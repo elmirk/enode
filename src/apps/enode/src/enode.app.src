@@ -1,0 +1,17 @@
+{application, enode,
+ [{description, "An smsrouter enode application"},
+  {vsn, "1.0.0"},
+  {registered, []},
+  {mod, {enode_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    taran,
+    lager
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.

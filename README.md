@@ -1,0 +1,2 @@
+# enode
+enode smsr

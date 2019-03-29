@@ -49,6 +49,9 @@
 %%with type at the beginning
 -define(sm_rp_da, [16#17, 16#09, 16#04, 16#07, 16#91, 16#97, 16#05, 16#66, 16#15, 16#10, 16#f0]).
 
+
+-define(enode_broker, enode_broker).
+
 -record(state, {subscriber_id, %%msisdn of subscirber, B num
                 dlg_id,        %%dialog id, SRI_SM from HLR
                                %%or MT_FWD_SM spawn the worker
@@ -196,7 +199,7 @@ handle_cast({delimit_ind, Request}, State) ->
 %% Payload here should be like
     Payload = create_map_open_rsp_payload(),
     DlgId = State#state.dlg_id,
-    gen_server:cast(broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
+    gen_server:cast(?enode_broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
 
     case component:handle_service_data(State#state.components) of
 	?mapst_snd_rtism_ind ->
@@ -322,13 +325,13 @@ sri_sm_req(Components)->
 %% p010b09060704000001001403010b1206001104970566152000030b120800110497056615200900
 %% also we should choos dlg id for outgoing dlgs
     Payload = create_map_open_req_payload(),
-    gen_server:cast(broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(Payload)}),
+    gen_server:cast(?enode_broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(Payload)}),
 %% payload here
 
 io:format("in srim sm req function after cast ~n"),
  
     Payload2 = map_srv_req_primitive(snd_rtism_req, Components),
-    gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_snd_rtism_req, Payload2}).
+    gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_snd_rtism_req, Payload2}).
 
 %%%-----------------------------------------------------------------------------
 %% @doc
@@ -347,7 +350,7 @@ send_sri_sm_ack(Components, DlgId)->
 %%    Payload x= [16#81,  16#0e, 16#01, 16#b5,   16#12, 16#08, 16#52, 16#20,
 %%	       16#07, 16#01, 16#30, 16#43, 16#77, 16#f7,  16#13, 16#07,
 %%	       16#91, 16#97, 16#05, 16#66, 16#15, 16#20, 16#f9, 16#00],
-    gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_snd_rtism_rsp, DlgId, list_to_binary(Payload)}).
+    gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_snd_rtism_rsp, DlgId, list_to_binary(Payload)}).
 
 
 %% function that need deep refactoring then!
@@ -379,7 +382,7 @@ mt_forward_sm_ack(DlgId)->
     Payload = [?mapst_mt_fwd_sm_rsp] ++ InvokeId ++
 	[?mappn_sm_rp_ui, 16#02, 16#0, 16#0,
 	 ?mappn_dialog_type, 1, ?mapdt_close_req, ?mappn_release_method, 1, 0, 16#00],
-    gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_mt_fwd_sm_rsp, DlgId, list_to_binary(Payload)}).
+    gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_mt_fwd_sm_rsp, DlgId, list_to_binary(Payload)}).
 
 
 forward_sm_ack(DlgId)->
@@ -394,7 +397,7 @@ forward_sm_ack(DlgId)->
 	       %%16#0e, 16#01, 16#01,   %%invoke_id   
 	       %%?mappn_sm_rp_ui, 16#02, 16#0, 16#0,
 	       [?mappn_dialog_type, 1, ?mapdt_close_req, ?mappn_release_method, 1, 0,  16#00],
-    gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_fwd_sm_rsp, DlgId, list_to_binary(Payload)}).
+    gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_fwd_sm_rsp, DlgId, list_to_binary(Payload)}).
 
 
 
@@ -405,7 +408,7 @@ forward_sm_ack(DlgId)->
 mo_forward_sm_req(Sm_Rp_Oa, Tp_Da)->
     io:format("in mo_forward_sm_req function ~n"),
     Payload = create_map_open_req_payload2(),
-    gen_server:cast(broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(Payload)}),
+    gen_server:cast(?enode_broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(Payload)}),
 %% payload here
 
     put(smrpoa, Sm_Rp_Oa),
@@ -415,7 +418,7 @@ mo_forward_sm_req(Sm_Rp_Oa, Tp_Da)->
     io:format("in mo_forward_sm_req function after cast ~n"),
     io:format("sm rp oa ~p and tp da ~p in mo forward sm req ~n", [Sm_Rp_Oa, Tp_Da]),
     Payload2 = mo_forwardSM(Sm_Rp_Oa, Tp_Da),
-    gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_mo_fwd_sm_req, list_to_binary(Payload2)}).
+    gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_mo_fwd_sm_req, list_to_binary(Payload2)}).
 
 mo_fwd_sm_cnf()->
     io:format("mo forward sm returned result!~n"),
@@ -571,7 +574,7 @@ map_srv_req_primitive(snd_rtism_req, Components)->
     Out.
 
 get_cid()->
-    gen_server:call(broker, get_cid).
+    gen_server:call(?enode_broker, get_cid).
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------

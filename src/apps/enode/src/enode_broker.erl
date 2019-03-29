@@ -33,16 +33,17 @@
 	 supervisor,
 	 [enode_dw_sup]}).
 
--ifdef(prod).
--define(c_node, 'c1@ubuntu').
--else.
--define(c_node, 'c1@elmir-N56VZ').
--endif.
+%%-ifdef(prod).
+%%-define(c_node, 'c1@ubuntu').
+%%-else.
+%%-define(c_node, 'c1@elmir-N56VZ').
+%%-endif.
 
 
 -record(state, {o_dialogs,
                 limit = 0,
-		sup}).
+		sup,
+                c_node}).
 
 %%%===================================================================
 %%% API
@@ -99,8 +100,22 @@ init({Limit, MFA, Sup}) ->
 %%tp_da - forwarded to number
 %%sm_rp_oa - originating address digits in MO_SUBMIT_SM, msisdn of subscriber
     ets:new(cid, [set, public, named_table]),  %% for {cid, sm_rp_oa, tp_da}
+    put(cid, 250270000000000),
 
-put(cid, 250270000000000),
+%%this part should be removed in case of tarantool is ok
+    ets:new(subscribers, [set, named_table]),
+    ets:insert(subscribers, {<<16#91, 16#97, 16#93, 16#93, 16#43, 16#81, 16#f3>>,
+			     <<16#0b, 16#91, 16#97, 16#15, 16#60, 16#52, 16#55, 16#f5>>}),
+    ets:insert(subscribers, {<<16#91, 16#97, 16#80, 16#33, 16#47, 16#33, 16#f9>>,
+			     <<16#0b, 16#91, 16#97, 16#06, 16#30, 16#05, 16#00, 16#f0>>}),
+    %%CNode = nodes:hidden(),
+
+    CNode = case nodes(hidden) of
+                [] ->
+                    undefined,
+                    self() ! discover_cnode;
+                [Data] -> Data
+            end,
 
     {ok, #state{limit=Limit, o_dialogs = Q}}.
 %%--------------------------------------------------------------------
@@ -147,7 +162,7 @@ handle_cast({Worker, MsgType = ?map_msg_dlg_req, PrimitiveType = ?mapdt_open_req
 %%    ODlgID = 
     {{value, ODlgId}, NewQueue} = queue:out(State#state.o_dialogs),
     NewState = State#state{o_dialogs=NewQueue},
-    {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
+    {any, State#state.c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
     ets:insert(didpid, {ODlgId, Worker}),
     ets:insert(piddid, {Worker, ODlgId}),
     io:format("didpid = ~p~n",[ets:tab2list(didpid)]),
@@ -157,38 +172,38 @@ handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtis
     %%io:format("send back to c node ~n"),
 %% TODO!! what about DlgId here!!!!
     [{_, ODlgId}] = ets:lookup(piddid, Worker),
-    {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
+    {any, State#state.c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
 %% maybe this is not good idea, but we send delimit automaticaly from broker
 %% alternatives - send delimit from dyn worker or send delimit in C code ?
 %% solution - use special parameter then no need for delim req or close req
     Data2 = list_to_binary([5, 0]),
-    {any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_delimiter_req, ODlgId, Data2},
+    {any, State#state.c_node} ! {?map_msg_dlg_req, ?mapdt_delimiter_req, ODlgId, Data2},
     {noreply, State};
 handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtism_rsp, Data}, State)->
     io:format("send back to c node mapst_snd_rtism_rsp ~n"),
 %% TODO!! what about DlgId here!!!!
     [{_, ODlgId}] = ets:lookup(piddid, Worker),
-    {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
+    {any, State#state.c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
     {noreply, State};
 handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_mo_fwd_sm_req, Data}, State)->
     io:format("send mo fwd sm req to c node ~n"),
 %% TODO!! what about DlgId here!!!!
     [{_, ODlgId}] = ets:lookup(piddid, Worker),
-    {any, ?c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
+    {any, State#state.c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
     {noreply, State};
 
 %%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 %%TODO - dyn worker doesnt send CLOSE DLG, we send it from Broker,
 %% need to anaylize if it possible to send close directly from C code????
 handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType =?mapst_snd_rtism_rsp, DlgId, Data}, State)->
-    {any, ?c_node} ! {MsgType, PrimitiveType, DlgId, Data},
+    {any, State#state.c_node} ! {MsgType, PrimitiveType, DlgId, Data},
     %%Data2 = list_to_binary([5, 0]),
     %%{any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_close_req, DlgId, Data2},
 
     {noreply, State};
 
 handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType =?mapst_mt_fwd_sm_rsp, DlgId, Data}, State)->
-    {any, ?c_node} ! {MsgType, PrimitiveType, DlgId, Data},
+    {any, State#state.c_node} ! {MsgType, PrimitiveType, DlgId, Data},
     %%Data2 = list_to_binary([5, 0]),
     %%{any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_close_req, DlgId, Data2},
 
@@ -198,7 +213,7 @@ handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType =?mapst_mt_fwd_sm
 
 handle_cast({Worker, MsgType, PrimitiveType, DlgId, Data}, State)->
     io:format("send back MAP MT FORWARD SM ACK to c node ~n"),
-    {any, ?c_node} ! {MsgType, PrimitiveType, DlgId, Data},
+    {any, State#state.c_node} ! {MsgType, PrimitiveType, DlgId, Data},
     {noreply, State};
 
 
@@ -221,6 +236,16 @@ handle_info({start_worker_supervisor, Sup, MFA}, S = #state{}) ->
     {ok, Pid} = supervisor:start_child(Sup, ?SPEC(MFA)),
     link(Pid),
     {noreply, S#state{sup=Pid}};
+
+handle_info(discover_cnode, State) ->
+    CNode =case nodes(hidden) of
+               [] ->
+                   self() ! discover_cnode,
+                   undefined;
+               [Data] ->
+                   Data
+           end,
+{noreply, State#state{c_node = CNode}};
 %%--------------------------------------------------------------------
 %% Process received dialog_open_ind from map_user c node
 %%--------------------------------------------------------------------

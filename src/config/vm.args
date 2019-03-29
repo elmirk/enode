@@ -1,6 +1,6 @@
--sname enode2
+-name enode@localhost
 
--setcookie enode_cookie
+-setcookie smsrouter
 
 +K true
 +A30

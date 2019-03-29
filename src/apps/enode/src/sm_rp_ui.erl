@@ -105,7 +105,8 @@
 		   dcs,
 		   scts,
 		   udl,
-		   ud}).
+		   ud,
+                   ud_ascii}). %parsed ud in case of gsm7bit coding
 
 -define(sms_deliver, 0).
 -define(sms_submit, 1).
@@ -173,15 +174,24 @@ parse_sms_deliver(Data)->
 %%<<Scts:7/binary, R2/binary >> = R,
 %%<< Udl:8, Ud/binary >> = R2,
 
+    Ud2 = case Dcs of
+              16#08->
+                  "ucs2";
+              16#00 ->
+                  sms_7bit_encoding:from_7bit(Ud)
+          end,
+
     #sm_rp_ui{message_type = sms_deliver,
-		       oa_data = Oa_data,
-		       oa_length = OAlength,
-		       oa_type = OAtype,
-		       pid = Pid,
-		       dcs = Dcs,
-		       scts = Scts,
-		       udl = Udl,
-		       ud = Ud}.
+              oa_data = Oa_data,
+              oa_length = OAlength,
+              oa_type = OAtype,
+              pid = Pid,
+              dcs = Dcs,
+              scts = Scts,
+              udl = Udl,
+              ud = Ud,
+              ud_ascii = Ud2
+             }.
 
 %%io:format("sms deliver = ~w~n", [Out]).
 
@@ -285,23 +295,35 @@ io:format("sm rp ui itog = ~p~n",[Bin8]),
 %% initially works for international OA types
 %% for alphanumeric OA there is no prefix and no text modification
 construct_new_ud(Sms_deliver)->
+
     case Sms_deliver#sm_rp_ui.oa_type of
 	16#91->
-	    MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
-	    List = [ [0, 48 + Digit] || Digit <- MsisdnDigits, Digit < 10],
-	    io:format("List = ~w~n", [lists:flatten(List)]),
-	    UDPrefix = lists:flatten(List) ++ [0,58,0,32],
-	    %%PrefixLength = length(UDPrefix),
-	    io:format("ud = ~p, udl = ~p ~n", [Sms_deliver#sm_rp_ui.ud, Sms_deliver#sm_rp_ui.udl]),
-	    {UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
+            MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
+            {UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
 			   8 ->
-			       modify_user_data(UDPrefix,
+                               %%MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
+                               List = [ [0, 48 + Digit] || Digit <- MsisdnDigits, Digit < 10],
+                               io:format("List = ~w~n", [lists:flatten(List)]),
+                               UDPrefix = lists:flatten(List) ++ [0,58,0,32],
+                               io:format("ud = ~p, udl = ~p ~n", [Sms_deliver#sm_rp_ui.ud, Sms_deliver#sm_rp_ui.udl]),
+                               %%{UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
+			   %%8 ->
+			       modify_user_data(ucs2, UDPrefix,
 						Sms_deliver#sm_rp_ui.udl,
 						Sms_deliver#sm_rp_ui.ud,
 						Sms_deliver#sm_rp_ui.udhi
 					       );
 			   _Other ->
-			       {Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud}
+                               %%convert each digit to ascii code of digit
+                               List = [ 48 + Digit  || Digit <- MsisdnDigits, Digit < 10],
+                               %%append ":" to List
+                               UDPrefix = List++[58],
+                               modify_user_data(gsm7bit, UDPrefix,
+						Sms_deliver#sm_rp_ui.udl,
+						Sms_deliver#sm_rp_ui.ud_ascii,
+						Sms_deliver#sm_rp_ui.udhi
+					       )
+			       %%{Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud}
 		       end;
 	16#d0->
 	    {UDL,UD} ={Sms_deliver#sm_rp_ui.udl,Sms_deliver#sm_rp_ui.ud}
@@ -309,7 +331,7 @@ construct_new_ud(Sms_deliver)->
     {UDL, UD}.
 
 
-modify_user_data(UDPrefix, Udl, Ud, Udhi)->
+modify_user_data(ucs2, UDPrefix, Udl, Ud, Udhi)->
     case Udhi of
 	0 ->
 	    Length = length(UDPrefix),   
@@ -321,8 +343,11 @@ modify_user_data(UDPrefix, Udl, Ud, Udhi)->
 	    end; 
 	1 ->
 	    {Udl, Ud}
-    end.
-
+    end;
+modify_user_data(gsm7bit, UDPrefix, Udl, Ud_ascii, Udhi) ->
+    NewUDascii = UDPrefix ++ Ud_ascii,
+    NewUD7bit = sms_7bit_encoding:to_7bit(NewUDascii),
+    {length(NewUDascii), NewUD7bit}.
 
 
 test()->

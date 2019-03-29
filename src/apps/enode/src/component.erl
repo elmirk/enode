@@ -44,11 +44,14 @@ parse_service_data([?mappn_invoke_id | [Length | T]]) ->
 parse_service_data([?mappn_msisdn | [Length | T]]) ->
     Msisdn = lists:sublist(T, 1, Length ),
     io:format("Msisdn in parse service data = ~p~n", [Msisdn]),
-    [{_, Tp_da}] = ets:lookup(subscribers, list_to_binary(Msisdn)),
+%%no need to do lookup here!
+%%in this function we just parse data
+%%    [{_, Tp_da}] = ets:lookup(subscribers, list_to_binary(Msisdn)),
     Sm_rp_oa = << Length, (list_to_binary(Msisdn))/binary >>,
     put(sm_rp_oa, Sm_rp_oa),
     put(msisdn, Msisdn),
-    put(tp_da, Tp_da),
+%%tp_da we should get from tarantool
+%%    put(tp_da, Tp_da),
     Out = lists:nthtail(Length, T),
     parse_service_data(Out);
 parse_service_data([?mappn_sm_rp_pri | [Length | T]]) ->

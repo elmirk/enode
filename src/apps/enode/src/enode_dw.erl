@@ -55,7 +55,7 @@
 -record(state, {subscriber_id, %%msisdn of subscirber, B num
                 dlg_id,        %%dialog id, SRI_SM from HLR
                                %%or MT_FWD_SM spawn the worker
-                tarantool,     %%connection to TT
+          %%      tarantool,     %%connection to TT
                 components,
                 sccp_calling,
                 sccp_called,
@@ -106,10 +106,16 @@ start_link(DlgId) ->
 init(DlgId)->
     %%process_flag(trap_exit, true),
 %%    {ok, TTconn} = taran:connect(),
-    State = case taran:connect() of
-                {ok, TTconn} -> #state{dlg_id = DlgId, tarantool = TTconn};
-                _Other -> #state{dlg_id = DlgId, tarantool = fail}
-            end,
+
+%%    State = case taran:connect() of
+%%                {ok, TTconn} -> #state{dlg_id = DlgId, tarantool = TTconn};
+%%                _Other -> #state{dlg_id = DlgId, tarantool = fail}
+%%            end,
+
+%% start all modules running in dw process
+    subscribers:start(),
+
+    State = #state{dlg_id = DlgId},
     {ok, State}.
 
 %%--------------------------------------------------------------------
@@ -206,8 +212,11 @@ handle_cast({delimit_ind, Request}, State) ->
 	    io:format("stay before send sri sm req ~n"),
 	    Cid = get_cid(),
 	    Msisdn = get(msisdn),
-	    [{_, Tp_da}] = ets:lookup(subscribers, list_to_binary(Msisdn)),
-	    ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, binary_to_list(Tp_da)}),
+
+	    %%[{_, Tp_da}] = ets:lookup(subscribers, list_to_binary(Msisdn)),
+            Tp_da = subscribers:get_cnum(Msisdn),
+
+	    ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, Tp_da}),
 	    %% update_sid(),
 	    %% CorrealatioId = fake IMSI
 	    %%CorrelationId = 250270900000000 + Sid,
@@ -408,17 +417,20 @@ forward_sm_ack(DlgId)->
 mo_forward_sm_req(Sm_Rp_Oa, Tp_Da)->
     io:format("in mo_forward_sm_req function ~n"),
     Payload = create_map_open_req_payload2(),
-    gen_server:cast(?enode_broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(Payload)}),
-%% payload here
+    %%gen_server:cast(?enode_broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(Payload)}),
 
     put(smrpoa, Sm_Rp_Oa),
     put(tpda, Tp_Da),
-    %%put(flag,1),
     
     io:format("in mo_forward_sm_req function after cast ~n"),
     io:format("sm rp oa ~p and tp da ~p in mo forward sm req ~n", [Sm_Rp_Oa, Tp_Da]),
     Payload2 = mo_forwardSM(Sm_Rp_Oa, Tp_Da),
-    gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_mo_fwd_sm_req, list_to_binary(Payload2)}).
+
+    lists:foreach(fun(Payload_mofsm)->
+                          gen_server:cast(?enode_broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(Payload)}),
+                          gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_mo_fwd_sm_req, list_to_binary(Payload_mofsm)})
+                  end,Payload2).
+    %%gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_mo_fwd_sm_req, list_to_binary(Payload2)}).
 
 mo_fwd_sm_cnf()->
     io:format("mo forward sm returned result!~n"),
@@ -530,10 +542,20 @@ mo_forwardSM(Msisdn, Tp_Da)->
     Sm_rp_uiB = list_to_binary(get(sm_rp_ui)),
     Sms_deliver = sm_rp_ui:parse(Sm_rp_uiB),
     Sm_rp_ui = sm_rp_ui:create_sms_submit(Sms_deliver, Tp_Da),
-    Sm_rp_ui_length = byte_size(Sm_rp_ui),
-    [?mapst_mo_fwd_sm_req] ++ InvokeId ++ Sm_rp_da ++ Sm_rp_oa ++ [?mappn_sm_rp_ui, Sm_rp_ui_length] ++
-	binary_to_list(Sm_rp_ui) ++
-	[?mappn_dialog_type, 1, ?mapdt_delimiter_req, 0].
+
+    case is_list(Sm_rp_ui) of
+        true ->
+            io:format("WARNING: should send concatenated sms!~n"),
+            lists:map(fun(A)->
+                              [?mapst_mo_fwd_sm_req] ++ InvokeId ++ Sm_rp_da ++ Sm_rp_oa ++ [?mappn_sm_rp_ui, byte_size(A)] ++
+                                  binary_to_list(A) ++ [?mappn_dialog_type, 1, ?mapdt_delimiter_req, 0]
+                      end,Sm_rp_ui);
+        false ->
+            Sm_rp_ui_length = byte_size(Sm_rp_ui),
+           [ [?mapst_mo_fwd_sm_req] ++ InvokeId ++ Sm_rp_da ++ Sm_rp_oa ++ [?mappn_sm_rp_ui, Sm_rp_ui_length] ++
+                binary_to_list(Sm_rp_ui) ++
+                [?mappn_dialog_type, 1, ?mapdt_delimiter_req, 0] ]
+    end.
 
 %% parsing received srv_ind data from C node
 %%parse_srv_data([?mapst_snd_rtism_ind | T]) ->

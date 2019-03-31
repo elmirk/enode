@@ -86,6 +86,8 @@
 	 parse/1,
 	 create_sms_submit/2]).
 
+-include("sm_rp_ui.hrl").
+
 -record(sm_rp_ui, {
 		   message_type,
 		   mti,
@@ -105,8 +107,19 @@
 		   dcs,
 		   scts,
 		   udl,
-		   ud,
+		   ud,  %%binary
                    ud_ascii}). %parsed ud in case of gsm7bit coding
+
+-record(concat, {
+                 header_length = [5],
+                 ie_identifier = [0], %%concatenated sms
+                 length_of_iea = [3], %% use 3 octets going next for
+                 %% concatenated sms
+                 ref_number, %%modulo 256 counter
+                 max_number,
+                 seq_number,
+                 ud  %% user data, related to text
+                }).
 
 -define(sms_deliver, 0).
 -define(sms_submit, 1).
@@ -160,9 +173,9 @@ parse_sms_deliver(Data)->
     <<OAlength:8, OAtype:8, Rest/binary>> = Data,
 
     case OAtype of
-	16#91 ->
+	?oa_numeric ->
 	    {Oa_data, Tail} = decode_numeric_oa(OAlength, Rest);
-	16#d0 -> %%alphanumeric oa field
+	?oa_alpha -> %%alphanumeric oa field
 	    {Oa_data, Tail} = decode_alphanum_oa(OAlength, Rest);
 	Other -> 
 	    {Oa_data,Tail} = decode_oa_carefully(Other, OAlength, Rest)
@@ -268,27 +281,68 @@ create_sms_submit(Sms_deliver, Tp_da)->
     {NewUDL, NewUD} = case Sms_deliver#sm_rp_ui.udhi of
 			  1->
 			      Flags = 16#51,
+                              %%check_ud_header(Sms_deliver#sm_rp_ui.ud),
 			      {Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud};
 			  0 ->
 			      Flags = 16#11,
 			      construct_new_ud(Sms_deliver)
-		      end,
+                      end,
 
-io:format("sms deliver = ~w~n", [Sms_deliver]),
+    io:format("sms deliver = ~w~n", [Sms_deliver]),
 
-    Bin0 = <<Flags>>,
+    %%Bin0 = <<Flags>>,
+
+    if
+        is_list(NewUD) ->
+            Bin0 = <<16#51>>; %%UDHI flag set for concatenated
+        true ->
+            Bin0 = <<Flags>>
+    end,
+
     Mr=?default_mr,
-%%Pid = Sms_deliver#sm_rp_ui.pid,
+    %%Pid = Sms_deliver#sm_rp_ui.pid,
     Bin2 = <<Bin0/binary, Mr >>,
     Da = list_to_binary(Tp_da),
     Bin3 = << Bin2/binary, Da/binary >>,    
     Bin4 = << Bin3/binary, (Sms_deliver#sm_rp_ui.pid) >>,
     Bin5 = << Bin4/binary, (Sms_deliver#sm_rp_ui.dcs) >>,
     Bin6 = << Bin5/binary, 255 >>,
-    Bin7 = << Bin6/binary, NewUDL:8 >>,
-    Bin8 = << Bin7/binary, NewUD/binary>>,
-io:format("sm rp ui itog = ~p~n",[Bin8]),
-    Bin8.
+
+    if
+        is_list(NewUD) ->
+            %%SMSNum = NewUDL,
+           %% Bin0=<<16#51>>,
+
+            Out = lists:map(fun(A) ->
+                                    UD =
+                                    list_to_binary(A#concat.header_length
+                                    ++ A#concat.ie_identifier ++ A#concat.length_of_iea ++ A#concat.ref_number ++
+                                                            [NewUDL] ++
+                                                            A#concat.seq_number ++ A#concat.ud),
+                                    L = byte_size(UD),
+                                    Bin7 = << Bin6/binary, L:8 >>,
+                                    Bin8 = << Bin7/binary, UD/binary>>,
+                                    io:format("sm rp ui itog = ~p~n",[Bin8]),
+                                    Bin8
+                            end, NewUD);
+                    %%should send concatenated messages to SMSC
+         %%   ok;
+        true->
+            
+            %%Bin0 = <<Flags>>,
+            %%Mr=?default_mr,
+            
+          %%  Bin2 = <<Bin0/binary, Mr >>,
+          %%  Da = list_to_binary(Tp_da),
+          %%  Bin3 = << Bin2/binary, Da/binary >>,    
+          %%  Bin4 = << Bin3/binary, (Sms_deliver#sm_rp_ui.pid) >>,
+          %%  Bin5 = << Bin4/binary, (Sms_deliver#sm_rp_ui.dcs) >>,
+          %%  Bin6 = << Bin5/binary, 255 >>,
+            Bin7 = << Bin6/binary, NewUDL:8 >>,
+            Bin8 = << Bin7/binary, NewUD/binary>>,
+            io:format("sm rp ui itog = ~p~n",[Bin8]),
+            Bin8
+    end.
 
 
 %% function to construct new text for sms concatenad with DA
@@ -339,7 +393,9 @@ modify_user_data(ucs2, UDPrefix, Udl, Ud, Udhi)->
 		    {Length + Udl,
 		     list_to_binary(UDPrefix ++ binary_to_list(Ud))};
 	       true ->
-		   {Udl, Ud}
+               %%seems after adding prefix to text we should use concatenated SMS to send
+                    SMSlist = prepare_concatenated(Length + Udl, UDPrefix ++ binary_to_list(Ud)),
+		   {length(SMSlist), SMSlist}
 	    end; 
 	1 ->
 	    {Udl, Ud}
@@ -348,6 +404,41 @@ modify_user_data(gsm7bit, UDPrefix, Udl, Ud_ascii, Udhi) ->
     NewUDascii = UDPrefix ++ Ud_ascii,
     NewUD7bit = sms_7bit_encoding:to_7bit(NewUDascii),
     {length(NewUDascii), NewUD7bit}.
+
+%%TODO this
+check_ud_header(UserData)->
+    %%<< Udhl:8, Rest/binary >>  = UserData,
+   ok.
+
+%% for case when test modification lead to use concatenated
+%% then we need to prepare concatenated sms objects
+%% for simple sms 140 octets in one sms - 70 ucs2 symbols
+%% for concatenated (140-6)/2 = 67 characters
+%%The TP elements in the SMS-SUBMIT PDU, apart from TP-MR, TP-UDL and TP-UD, should remain
+%%unchanged for each SM which forms part of a concatenated SM, otherwise this may lead to irrational
+%%behaviour.
+prepare_concatenated(Octets_num,
+                     UCS2List)->prepare_concatenated(Octets_num,
+                                                     UCS2List, [], 1).
+
+prepare_concatenated(Octets_num, UCS2List, [], Sequence)->
+   %% case lists:split(140-6,UCS2Lits) of
+        {List1, List2} = lists:split(140-6,UCS2List),
+        Part = #concat{ref_number = [0], seq_number = [Sequence], ud = List1},
+    prepare_concatenated(Octets_num - 134, List2, [ Part | []], Sequence+1);
+
+prepare_concatenated(Octets_num, UCS2List, Acc, Sequence) ->
+    case Octets_num < 134 of
+        true->
+            Part = #concat{ref_number = [0], seq_number = [Sequence],
+    max_number = Sequence, ud = UCS2List},
+            [ Part | Acc ];
+        false ->
+            {List1, List2} = lists:split(134,UCS2List),
+            Part = #concat{ref_number = [0], seq_number = [Sequence], ud = List1},
+            prepare_concatenated(Octets_num - 134, List2, [ Part | Acc], Sequence+1)
+
+    end.
 
 
 test()->

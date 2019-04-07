@@ -16,7 +16,8 @@
 
 
 %% service primitive types
-
+-define(empty_service_portion, 16#00). %%if incoming components list
+%%=[], suppos TCAP handshake procedure (Beeline traces)
 -define(mapst_snd_rtism_req, 16#01).
 -define(mapst_snd_rtism_ind, 16#02).
 -define(mapst_mo_fwd_sm_req, 16#03). %%version 3 onwards
@@ -56,8 +57,21 @@
 -define(mappn_more_msgs, 16#1a). %%More messages to send, special coding 1a00 - means true, look dialogic MAP manual.
 -define(mappn_user_err, 16#15).
 -define(mappn_gprs_support_ind, 16#76).
+-define(mappn_sm_rp_mti, 16#77). 
+-define(mappn_sm_rp_smea, 16#78).
 
 %%%
+%% mappn_result values
+-define(dlg_accept, 0).
+-define(dlg_refused, 1).
+
+
+%%sm_rp_da types - first octet of sm_rp_da
+-define(sm_rp_da_imsi, 0).
+-define(sm_rp_da_lmsi, 1).
+-define(sm_rp_da_roaming_number, 3).
+-define(sm_rp_da_sca, 4). %% Service centre address
+-define(no_sm_rp_da, 5).
 
 %% First octet showing type of address encoded as specified
 %% in ETS 300-599, i.e.

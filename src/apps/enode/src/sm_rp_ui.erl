@@ -84,7 +84,11 @@
 	 test2_1/0,
 	 test3/0,
 	 parse/1,
-	 create_sms_submit/2]).
+         check_concatenation/0,
+         prepare_concatenated/2,
+	 create_sms_submit/2,
+         get_ref/0,
+         get_maxnum/0]).
 
 -include("sm_rp_ui.hrl").
 
@@ -108,7 +112,10 @@
 		   scts,
 		   udl,
 		   ud,  %%binary
-                   ud_ascii}). %parsed ud in case of gsm7bit coding
+                   ud_ascii, %parsed ud in case of gsm7bit coding
+                   header_length,
+                   header,
+                   ud_wo_header}). %%binary
 
 -record(concat, {
                  header_length = [5],
@@ -121,9 +128,6 @@
                  ud  %% user data, related to text
                 }).
 
--define(sms_deliver, 0).
--define(sms_submit, 1).
--define(default_mr, 202).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -143,7 +147,7 @@ parse(Sm_rp_ui)->
 	?sms_deliver ->
 	    [Rp, Udhi, Sri, Lp, Mms] = parse_flags(sms_deliver, Flags),
 	    %%[Rp, Udhi, Sri, Lp, Mms, Mti] = parse_flags(Flags),
-	    Obj = parse_sms_deliver(Rest),
+	    Obj = parse_sms_deliver(Udhi, Rest),
 	    NewObj = Obj#sm_rp_ui{rp=Rp,
 				  udhi = Udhi,
 				  sri = Sri,
@@ -159,15 +163,18 @@ parse(Sm_rp_ui)->
 				  vpf = Vpf,
 				  rd = Rd,
 				  mti = Mti};
+        
 	_Other -> 
 	    NewObj = error
     end,
 
     io:format("sms deliver = ~w~n", [NewObj]),
+    %%something like MV))
+    put(sm_rp_ui_mv, NewObj),
     NewObj.
 
 
-parse_sms_deliver(Data)->
+parse_sms_deliver(Udhi, Data)->
     
 
     <<OAlength:8, OAtype:8, Rest/binary>> = Data,
@@ -177,8 +184,8 @@ parse_sms_deliver(Data)->
 	    {Oa_data, Tail} = decode_numeric_oa(OAlength, Rest);
 	?oa_alpha -> %%alphanumeric oa field
 	    {Oa_data, Tail} = decode_alphanum_oa(OAlength, Rest);
-	Other -> 
-	    {Oa_data,Tail} = decode_oa_carefully(Other, OAlength, Rest)
+	_Other -> 
+	    {Oa_data,Tail} = decode_oa_carefully(_Other, OAlength, Rest)
     end,
 
 %%Slen = 56,
@@ -186,6 +193,16 @@ parse_sms_deliver(Data)->
 << Pid:8, Dcs:8, Scts:7/binary, Udl:8, Ud/binary >>  = Tail,
 %%<<Scts:7/binary, R2/binary >> = R,
 %%<< Udl:8, Ud/binary >> = R2,
+
+    <<HeaderLength:8, Other/binary >> = case Udhi of
+                                            ?udhi_true->
+                                                Ud;
+                                                %%<<Header:HeaderLength, Ud_wo_header/binary >> = _Other;
+                                            ?udhi_false ->
+                                                %%do_nothing
+                                                <<0>>
+                                        end,
+    <<Header:HeaderLength/binary, Ud_wo_header/binary >> = Other,
 
     Ud2 = case Dcs of
               16#08->
@@ -203,7 +220,10 @@ parse_sms_deliver(Data)->
               scts = Scts,
               udl = Udl,
               ud = Ud,
-              ud_ascii = Ud2
+              ud_ascii = Ud2,
+              header_length = HeaderLength,
+              header = Header, %%header octet string
+              ud_wo_header = Ud_wo_header
              }.
 
 %%io:format("sms deliver = ~w~n", [Out]).
@@ -220,9 +240,10 @@ parse_flags(sms_submit, Flags)->
       [Rp, Udhi, Srr, Vpf, Rd].
 
 
-
+%% will should parse only sms_submit_report
+%% if needed
 parse_sms_submit(_Data)->
-    ok.
+    #sm_rp_ui{message_type = sms_submit_report}.
 
 get_oa(Data)->
     <<MTI:8, OAlength:8, OAtype:8, Rest/binary>> = Data,
@@ -351,7 +372,7 @@ create_sms_submit(Sms_deliver, Tp_da)->
 construct_new_ud(Sms_deliver)->
 
     case Sms_deliver#sm_rp_ui.oa_type of
-	16#91->
+	?oa_numeric ->
             MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
             {UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
 			   8 ->
@@ -379,8 +400,19 @@ construct_new_ud(Sms_deliver)->
 					       )
 			       %%{Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud}
 		       end;
-	16#d0->
-	    {UDL,UD} ={Sms_deliver#sm_rp_ui.udl,Sms_deliver#sm_rp_ui.ud}
+	?oa_alpha ->
+            Oa_ascii = sms_7bit_encoding:from_7bit(Sms_deliver#sm_rp_ui.oa_data),
+	    {UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
+			   ?dcs_ucs2 ->
+                               {Sms_deliver#sm_rp_ui.udl,Sms_deliver#sm_rp_ui.ud};
+                           ?dcs_7bit ->
+                               UDPrefix = Oa_ascii ++ [58],
+                               modify_user_data(gsm7bit, UDPrefix,
+						Sms_deliver#sm_rp_ui.udl,
+						Sms_deliver#sm_rp_ui.ud_ascii,
+						Sms_deliver#sm_rp_ui.udhi
+					       )
+                       end          
     end,
     {UDL, UD}.
 
@@ -439,6 +471,54 @@ prepare_concatenated(Octets_num, UCS2List, Acc, Sequence) ->
             prepare_concatenated(Octets_num - 134, List2, [ Part | Acc], Sequence+1)
 
     end.
+
+-spec check_concatenation() -> {true, tuple()} | {false, 0}.
+check_concatenation()->
+    Sms_deliver = get(sm_rp_ui_mv),
+    case {Sms_deliver#sm_rp_ui.udhi, Sms_deliver#sm_rp_ui.header_length}  of
+        {?udhi_true, 5} ->
+            handle_concat_info(Sms_deliver#sm_rp_ui.header, Sms_deliver#sm_rp_ui.ud_wo_header);
+        {?udhi_true, _Other} ->
+            {false, 0};
+        {?udhi_false, _Other} ->
+            {false, 0}
+    end.
+
+
+%% TODO - should do more carefully second clause
+-spec handle_concat_info(Header :: binary(), UD :: binary()) -> boolean().
+handle_concat_info(<< 0, 3, _Ref:8, _Max:8, Seq:8 >>, Ud)->
+    FullUd = {Seq, binary_to_list(Ud)},
+    %%case get(parts_received) of
+     %%   undefined ->
+       %%     NewParts = 1,
+        %%    put(parts_received, NewParts),
+            %%        FullUd = [{Seq, binary_to_list(UD)}],
+            %%put(full_text, [ FullUd | [] ]);
+        %%Parts ->
+        %%    NewParts = Parts + 1,
+        %%    put(parts_received, NewParts),
+            %%Previous = get(full_text),
+            %%put(full_text, [ FullUd | Previous])
+    %%end,
+    %%if
+     %%   NewParts =:= Max ->
+       %%     put(all_parts_received, true);
+       %% true ->do_nothing
+    %%end,
+    {true, FullUd};
+handle_concat_info(<< _IEAid:8, _IEAlength:8, _Ref:8, _Max:8, _Seq:8 >>, _Ud)->
+    {false, 0}.
+
+get_ref()->
+    Sms_deliver = get(sm_rp_ui_mv),
+    << 0, 3, Ref:8, _Max:8, _Seq:8 >> = Sms_deliver#sm_rp_ui.header,
+    Ref.
+
+get_maxnum()->
+    Sms_deliver = get(sm_rp_ui_mv),
+    << 0, 3, _Ref:8, Max:8, _Seq:8 >> = Sms_deliver#sm_rp_ui.header,
+    Max.
 
 
 test()->

@@ -102,6 +102,15 @@ init({Limit, MFA, Sup}) ->
     ets:new(cid, [set, public, named_table]),  %% for {cid, sm_rp_oa, tp_da}
     put(cid, 250270000000000),
 
+
+    ets:new(parts, [bag, public, named_table]),
+
+%%may be next table should be ordered set and protected?
+    ets:new(sri_sm, [set, public, named_table]),
+
+%%like segments))
+    ets:new(db0, [set, public, named_table]),
+
 %%this part should be removed in case of tarantool is ok
     ets:new(subscribers, [set, named_table]),
     ets:insert(subscribers, {<<16#91, 16#97, 16#93, 16#93, 16#43, 16#81, 16#f3>>,
@@ -168,6 +177,14 @@ handle_cast({Worker, MsgType = ?map_msg_dlg_req, PrimitiveType = ?mapdt_open_req
     io:format("didpid = ~p~n",[ets:tab2list(didpid)]),
     io:format("piddid = ~p~n",[ets:tab2list(piddid)]),
     {noreply, NewState};
+
+%send delimiter to map
+handle_cast({Worker, MsgType = ?map_msg_dlg_req, PrimitiveType = ?mapdt_delimiter_req, Data}, State)->
+
+    Data2 = list_to_binary([5, 0]),
+    {any, State#state.c_node} ! {?map_msg_dlg_req, ?mapdt_delimiter_req, Data, Data2},
+    {noreply, State};
+
 handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtism_req, Data}, State)->
     %%io:format("send back to c node ~n"),
 %% TODO!! what about DlgId here!!!!
@@ -195,8 +212,9 @@ handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_mo_fwd_s
 %%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 %%TODO - dyn worker doesnt send CLOSE DLG, we send it from Broker,
 %% need to anaylize if it possible to send close directly from C code????
-handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType =?mapst_snd_rtism_rsp, DlgId, Data}, State)->
-    {any, State#state.c_node} ! {MsgType, PrimitiveType, DlgId, Data},
+handle_cast({Worker, ?map_msg_srv_req, ?mapst_snd_rtism_rsp, DlgId, Data}, State)->
+    io:format("send SRI_SM_ACK from smsrouter ~n"),
+    {any, State#state.c_node} ! {?map_msg_srv_req, ?mapst_snd_rtism_rsp, DlgId, Data},
     %%Data2 = list_to_binary([5, 0]),
     %%{any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_close_req, DlgId, Data2},
 

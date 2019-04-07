@@ -22,6 +22,12 @@
 %%% component payload
 %%%---------------------------------------------------------------------------
 
+%%when receive TC-BEGIN with zero service data
+%% suppose this is TCAP handshake procedure
+%% in MT forward SM flow
+handle_service_data([]) ->
+    ?empty_service_portion;
+
 handle_service_data(Components)->
 %% TODO !
     [Component | _Tail] = Components,
@@ -76,12 +82,22 @@ parse_service_data([?mappn_sc_addr | [Length | T]]) ->
     parse_service_data(Out);
 parse_service_data([?mappn_sm_rp_ui | [Length | T]]) ->
     Sm_rp_ui = lists:sublist(T, 1, Length ),
-    put(sm_rp_ui, Sm_rp_ui),
+ 
+%%%TBD - refactor!!
+   put(sm_rp_ui, Sm_rp_ui),
+    Sm_rp_uiB = list_to_binary(Sm_rp_ui),
+    Sms_deliver_ = sm_rp_ui:parse(Sm_rp_uiB),
+   
     Out = lists:nthtail(Length, T),
     parse_service_data(Out);
 parse_service_data([?mappn_sm_rp_da | [Length | T]]) ->
     Sm_rp_da = lists:sublist(T, 1, Length ),
-    put(sm_rp_da, Sm_rp_da),
+    
+    case check_sm_rp_da_type(Sm_rp_da) of
+        ?sm_rp_da_imsi -> put(sm_rp_da, Sm_rp_da);
+        _Other -> do_nothing
+    end,
+    %%put(sm_rp_da, Sm_rp_da),
     Out = lists:nthtail(Length, T),
     parse_service_data(Out);
 parse_service_data([?mappn_user_err | [Length | T]]) ->
@@ -95,14 +111,51 @@ parse_service_data([?mappn_sm_rp_oa | [Length | T]]) ->
     Out = lists:nthtail(Length, T),
     parse_service_data(Out);
 parse_service_data([?mappn_more_msgs | [_Length | T]]) ->
-    More_msg = 1,
-    put(more_msg, More_msg),
+    put(more_msg, 1),
     %%Out = lists:nthtail(Length, T),
     parse_service_data(T);
 parse_service_data([?mappn_gprs_support_ind | [_Length | T]]) ->
     put(gprs_support_ind, 1),
     %%Out = lists:nthtail(Length, T),
     parse_service_data(T);
-
+parse_service_data([?mappn_sm_rp_mti | [Length | T]]) ->
+    Sm_rp_mti = lists:sublist(T, 1, Length ),
+    put(sm_rp_mti, Sm_rp_mti),
+    Out = lists:nthtail(Length, T),
+    parse_service_data(Out);
+%%put(gprs_support_ind, 1),
+    %%Out = lists:nthtail(Length, T),
+ %%   parse_service_data(T);
+%%MAPPN_sm_rp_smea
+parse_service_data([?mappn_sm_rp_smea | [Length | T]]) ->
+    Sm_rp_smea = lists:sublist(T, 1, Length ),
+    put(sm_rp_smea, Sm_rp_smea),
+    Out = lists:nthtail(Length, T),
+    parse_service_data(Out);
 parse_service_data([0])->
     get(service_type).
+
+%%% Parameter name MAPPN_sm_rp_da
+%%% Parameter length Variable, in the range 3 to 22
+%%% Parameter data First octet showing type of address encoded as specified
+%%% in ETS 300-599, i.e.
+%%% 0 – IMSI
+%%% 1 – LMSI
+%%% 3 – Roaming Number (MAP V1 only)
+%%% 4 – Service centre address
+%%% 5 – no SM-RP-DA (not MAP V1)
+%%% Second octet, indicating the number of octets that follow.
+%%% Subsequent octets containing the content octets of the
+%%% IMSI, LMSI, Roaming Number or address string encoded
+%%% as specified in ETS 300-599.
+check_sm_rp_da_type([?sm_rp_da_imsi | [_Length | _Data]])->
+    ?sm_rp_da_imsi;
+check_sm_rp_da_type([?sm_rp_da_lmsi | [_Length | _Data]]) ->
+    ?sm_rp_da_lmsi;
+check_sm_rp_da_type([?sm_rp_da_roaming_number | [_Length | _Data]]) ->
+    ?sm_rp_da_roaming_number;
+check_sm_rp_da_type([?sm_rp_da_sca | [_Length | _Data]]) ->
+    ?sm_rp_da_sca;
+check_sm_rp_da_type([?no_sm_rp_da | [_Length | _Data]]) ->
+    ?no_sm_rp_da.
+

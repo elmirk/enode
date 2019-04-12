@@ -65,3 +65,29 @@ from_7bit(<<Byte:8,In/binary>>,<<CharI>>,Out,Cntr) ->
     Char = (Byte bsl (Cntr - 1)) bor CharI,
     CharN = Byte bsr (8 - Cntr),
     from_7bit(In,<<CharN>>,<<Out/binary,0:1,Char:7>>,Cntr+1).
+
+%%--------------------------------------------------------------------
+%% @doc
+%% remove fill bit from LSB in first octet after Header and 
+%% change octet string in UD into 7bit encoded string
+%% @spec
+%% @end
+%%--------------------------------------------------------------------
+-spec remove_fillbit_from_7bit( binary() ) -> binary().
+
+remove_fillbit_from_7bit(Gsm7bit_filled)->
+L = [ {X bsr 1, (X band 2#01) bsl 7} || <<X>> <= Gsm7bit_filled],
+{RetL, _} = lists:foldl(fun({A, B}, {Acc, Lsb})-> Out = A bor Lsb, {[Out | Acc], B} end, {[], 0}, lists:reverse(L)),
+list_to_binary(RetL).
+
+
+
+
+-spec add_fillbit_to_7bit( binary() ) -> binary().
+
+add_fillbit_to_7bit(Gsm7bit)->
+
+L = [ { (X bsl 1) band 16#ff, (X band 16#80) bsr 7 } || <<X>> <= Gsm7bit],
+{Out, _} = lists:foldl(fun({A, B}, {Acc, Flagin})-> Out7 = A bor Flagin, {[Out7 | Acc],B} end, {[], 0}, L),
+list_to_binary(lists:reverse(Out)).
+

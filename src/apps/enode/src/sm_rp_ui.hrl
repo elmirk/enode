@@ -7,6 +7,7 @@
 
 -define(dcs_ucs2, 16#08).
 -define(dcs_7bit, 16#00). 
+-define(dcs_akbars, 16#01).
 
 -define(sms_deliver, 0).
 -define(sms_submit, 1).

@@ -132,6 +132,11 @@ parse_service_data([?mappn_sm_rp_smea | [Length | T]]) ->
     put(sm_rp_smea, Sm_rp_smea),
     Out = lists:nthtail(Length, T),
     parse_service_data(Out);
+parse_service_data([?mappn_sm_deliv_outcome | [Length | T ]])->
+    Sm_deliv_outcome = lists:sublist(T, 1, Length ),
+    put(sm_deliv_outcome, Sm_deliv_outcome),
+    Out = lists:nthtail(Length, T),
+    parse_service_data(Out);
 parse_service_data([0])->
     get(service_type).
 

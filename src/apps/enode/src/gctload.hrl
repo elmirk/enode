@@ -8,6 +8,7 @@
 %% dialogue primitive types
 
 -define(mapdt_open_req, 1).
+-define(mapdt_open_ind, 2).
 -define(mapdt_close_req, 3).
 -define(mapdt_close_ind, 4).
 -define(mapdt_delimiter_req, 5).
@@ -30,7 +31,8 @@
 -define(mapst_fwd_sm_cnf, 16#84). %%MAP-FORWARD-SHORT-MESSAGE-CNF (versions 1 and 2)
 -define(mapst_mo_fwd_sm_cnf, 16#84). %%MAP-MO-FORWARD-SHORT-MESSAGE-CNF (version 3 onwards)
 -define(mapst_fwd_sm_ind, 16#04). %%MAP-FORWARD-SHORT-MESSAGE-IND (versions 1 and 2)
-%%SM Delivery Outcome MAPPN_sm_deliv_outcome 27 0x1b
+-define(mapst_rpt_smdst_req, 16#05). %%MAP-REPORT-SM-DELIVERY-STATUS-REQ
+-define(mapst_rpt_smdst_ind, 16#06). %%MAP-REPORT-SM-DELIVERY-STATUS-IND
 
 
 %% MAP Dialogue Primitive Parameters
@@ -59,6 +61,7 @@
 -define(mappn_gprs_support_ind, 16#76).
 -define(mappn_sm_rp_mti, 16#77). 
 -define(mappn_sm_rp_smea, 16#78).
+-define(mappn_sm_deliv_outcome, 16#1b). %%SM delivery outcome
 
 %%%
 %% mappn_result values

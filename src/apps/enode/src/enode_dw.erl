@@ -29,11 +29,15 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3, format_status/2]).
 
+%%-include("dyn_defs.hrl").
+-include("gctload.hrl").
+-include("enode_broker.hrl").
+
 -define(SERVER, ?MODULE).
 
 %% definest should be checked before production!!
 %% !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
--define(mapdt_open_ind, 2).
+%% -define(mapdt_open_ind, 2).
 %%-define(mapdt_open_rsp, 16#81).
 %%-define(mapdt_open_req, 16#01).
 %%-define(mappn_result, 9).
@@ -48,9 +52,6 @@
 %%used in MO_FORWARD_SM, actually SMSC
 %%with type at the beginning
 -define(sm_rp_da, [16#17, 16#09, 16#04, 16#07, 16#91, 16#97, 16#05, 16#66, 16#15, 16#10, 16#f0]).
-
-
--define(enode_broker, enode_broker).
 
 -record(state, {subscriber_id, %%msisdn of subscirber, B num
                 dlg_id,        %%dialog id, SRI_SM from HLR
@@ -70,8 +71,6 @@
 
 -record(sccp, {sccp_calling, sccp_called, ac_name}).
 
-%%-include("dyn_defs.hrl").
--include("gctload.hrl").
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -177,7 +176,7 @@ handle_cast({dlg_ind_open, Request}, State) ->
 %%--------------------------------------------------------------------
 %% Case - receive empty TCAP-BEGIN
 %%--------------------------------------------------------------------
-handle_cast({delimit_ind, Request}, State = #state{dlg_state = open}) ->
+handle_cast({delimit_ind, _Request}, State = #state{dlg_state = open}) ->
 %%    io:format("srv_ind received ~n"),
 %%    Components = State#state.components,
 %%    NewState = State#state{dlg_state = components = [ Request | Components ]},
@@ -228,7 +227,7 @@ handle_cast({srv_ind, Request}, State = #state{dlg_state = open_confirmed} ) ->
     {noreply, NewState};
 
 
-handle_cast({mapdt_open_cnf, Request}, State) ->
+handle_cast({mapdt_open_cnf, _Request}, State) ->
 
  %%   case get(flag) of
 %%	undefined ->
@@ -404,7 +403,11 @@ handle_service_data(State)->
 	    put(cid, Cid),
 %%	    sri_sm_req(State#dialog.components);
 	    send_sri_sm_ack(State#state.components, State#state.dlg_id);
-
+        %%reportSm-deliveryStatus received from SMSC
+        %%we should send it to HLR
+        ?mapst_rpt_smdst_ind ->
+            hlr_agent:invoke_reportSM_DeliveryStatus(State#state.components)
+      ;
 	?mapst_mt_fwd_sm_ind ->
 	    io:format("MT_FSM_v3 received ======================================== ~n"),
             
@@ -498,7 +501,11 @@ handle_service_data(State)->
                             if
                                 MaxNum =:= PartsReceived->
                                     [{_Cid, Sm_rp_oa, Tp_da}] = ets:lookup(cid, list_to_binary(Imsi)),
-                                    mo_forward_sm_req_concatenated(Sm_rp_oa, Tp_da, Key);
+                                    mo_forward_sm_req_concatenated(Sm_rp_oa, Tp_da, Key),
+                                    %% TODO
+                                    %% need to check if no race conditions and errors!!
+                                    %% when another worker use the same Key at the same moment
+                                    ets:delete(parts, Key);
                                 true ->
                                     %%Result_ = ets:update_counter(db0,Key,{3,1})
                                     do_nothing
@@ -803,8 +810,9 @@ ac_text([9,6,7,4,0,0,1,0,20,2])-> shortMsgGatewayContext_v2; %%SRI SM from SMSC 
 ac_text([9,6,7,4,0,0,1,0,21,1])-> shortMsgRelayContext_v1;
 ac_text([9,6,7,4,0,0,1,0,21,3])-> shortMsgMORelayContext_v3; %%smsr use this when send MO SM to SMSC TMT
 ac_text([9,6,7,4,0,0,1,0,25,2])-> shortMsgMTRelayContext_v2; %%forwardSM(46) from Tele2 SMSC   
-ac_text([9,6,7,4,0,0,1,0,20,3])-> shortMsgGatewayContext_v3. %%used by bee in ping SRI SM to smsr
-    
+ac_text([9,6,7,4,0,0,1,0,20,3])-> shortMsgGatewayContext_v3; %%used by bee in ping SRI SM to smsr
+ac_text([9,6,7,4,0,0,1,0,20,1])-> shortMsgGatewayContext_v1. %% when send sms from Megafon NN    
+   
 
 %% pptr[0] = MAPDT_OPEN_RSP;
 %%    pptr[1] = MAPPN_result;

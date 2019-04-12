@@ -38,8 +38,24 @@
                  ref_number, %%modulo 256 counter
                  max_number,
                  seq_number,
+                 udl, %%septets number for gsm7bit, octets number for ucs2
                  ud  %% user data, related to text
                 }).
+
+%% should create list of sms_submits
+
+%% GSM SMS TPDU (GSM 03.40) SMS-SUBMIT
+
+%% 16#51:
+
+%%    0... .... = TP-RP: TP Reply Path parameter is not set in this SMS SUBMIT/DELIVER
+%%    .1.. .... = TP-UDHI: The beginning of the TP UD field contains a Header in addition to the short message
+%%    ..0. .... = TP-SRR: A status report is not requested
+%%    ...1 0... = TP-VPF: TP-VP field present - relative format (2)
+%%    .... .0.. = TP-RD: Instruct SC to accept duplicates
+%%    .... ..01 = TP-MTI: SMS-SUBMIT (1)
+
+
 
 
 create_sms_submits(Tp_da, Key) ->
@@ -70,12 +86,34 @@ create_sms_submits(Tp_da, Key) ->
                             sm_rp_ui:prepare_concatenated(length(Ud2), Ud2);
                         
                         ?oa_alpha ->
-                            do_something,
-                            []
+                            %%in case when OA is alphanum
+                            %%it is ascii chars
+                            OAchars = sms_7bit_encoding:from_7bit(H#sm_rp_ui.oa_data),
+                            List = [ [0, Char] || Char <- OAchars],
+                            Prefix = lists:flatten(List) ++ [0,58,0,32],
+                            %%UDPrefix = OAchars ++ [58,32],
+                            Ud2 = Prefix ++ UdFull,
+                            sm_rp_ui:prepare_concatenated(length(Ud2), Ud2)
                     end;
                     
                 ?dcs_7bit ->
-                    do_something
+                    UdFull = merge_all_ud(Sorted),
+                    case H#sm_rp_ui.oa_type of
+                        ?oa_numeric ->
+                            MsisdnDigits = bcd:decode(msisdn, H#sm_rp_ui.oa_data),
+                            %%MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
+                            List = [ 48 + Digit || Digit <- MsisdnDigits, Digit < 10],
+                            Prefix = List ++ [58,32],
+                            Ud2 = Prefix ++ UdFull,
+                            sm_rp_ui:prepare_concatenated(gsm7bit, length(Ud2),
+                                                          Ud2);
+                        ?oa_alpha ->
+                            OAchars = sms_7bit_encoding:from_7bit(H#sm_rp_ui.oa_data),
+                            Prefix = OAchars ++ ": ",
+                            Ud2 = Prefix ++ UdFull,
+                            sm_rp_ui:prepare_concatenated(gsm7bit, length(Ud2),
+                                                          Ud2)
+                    end
             end, 
     MaxNum = length(Parts),
 
@@ -99,7 +137,7 @@ create_sms_submits(Tp_da, Key) ->
                                     ++ A#concat.ie_identifier ++ A#concat.length_of_iea ++ A#concat.ref_number ++
                                                             [MaxNum] ++
                                                             A#concat.seq_number ++ A#concat.ud),
-                                    L = byte_size(UD),
+                                    L = A#concat.udl,
                                     Bin7 = << Bin6/binary, L:8 >>,
                                     Bin8 = << Bin7/binary, UD/binary>>,
                                     %%io:format("sm rp ui itog = ~p~n",[Bin8]),
@@ -124,6 +162,18 @@ create_sms_submits(Tp_da, Key) ->
           %%  Bin8
     %%end.
 
+
+
+-spec merge_all_ud( Sorted :: [{integer(), {integer(), binary()}}] ) -> string().
+
+merge_all_ud(Sorted)->
+    
+    Res = lists:foldr(fun({_Seq, {_Dcs, Ud1}}, Acc) -> 
+                              Gsm_7bit = sms_7bit_encoding:remove_fillbit_from_7bit(Ud1),
+                              AsciiList = sms_7bit_encoding:from_7bit(Gsm_7bit),
+                              AsciiList ++  Acc 
+                      end, [], Sorted).
+%%    binary_to_list(Res).
 
 
 

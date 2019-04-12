@@ -86,7 +86,8 @@
 	 parse/1,
          check_concatenation/0,
          prepare_concatenated/2,
-	 create_sms_submit/2,
+	 prepare_concatenated/3,
+         create_sms_submit/2,
          get_ref/0,
          get_maxnum/0]).
 
@@ -105,7 +106,7 @@
 		   rd,
 		   oa_length, %%0x0b
 		   oa_type, %%0x91
-		   oa_data, %%9720171182f7
+		   oa_data, %%9720171182f7 or gsm7bit coded alphanum
 		   oa_raw,  %%0b919720171182f7
 		   pid,
 		   dcs,
@@ -125,6 +126,7 @@
                  ref_number, %%modulo 256 counter
                  max_number,
                  seq_number,
+                 udl,
                  ud  %% user data, related to text
                 }).
 
@@ -208,6 +210,9 @@ parse_sms_deliver(Udhi, Data)->
               16#08->
                   "ucs2";
               16#00 ->
+                  sms_7bit_encoding:from_7bit(Ud);
+              %%akbars send sms with this DCS
+              16#01 ->
                   sms_7bit_encoding:from_7bit(Ud)
           end,
 
@@ -411,6 +416,13 @@ construct_new_ud(Sms_deliver)->
 						Sms_deliver#sm_rp_ui.udl,
 						Sms_deliver#sm_rp_ui.ud_ascii,
 						Sms_deliver#sm_rp_ui.udhi
+					       );
+                           ?dcs_akbars -> 
+                               UDPrefix = Oa_ascii ++ [58],
+                               modify_user_data(gsm7bit, UDPrefix,
+						Sms_deliver#sm_rp_ui.udl,
+						Sms_deliver#sm_rp_ui.ud_ascii,
+						Sms_deliver#sm_rp_ui.udhi
 					       )
                        end          
     end,
@@ -452,25 +464,64 @@ check_ud_header(UserData)->
 prepare_concatenated(Octets_num,
                      UCS2List)->prepare_concatenated(Octets_num,
                                                      UCS2List, [], 1).
-
+%%this clause is for strange TMT console cases
+%%when single sms have concatenation header
+%%it seems like trick from SMSC vendors:-)
+prepare_concatenated(Octets_num, UCS2List, [], Sequence) when
+      Octets_num < 134 ->
+    [#concat{ref_number = [0], seq_number = [Sequence], udl
+             = Octets_num + 6, ud = UCS2List}];
 prepare_concatenated(Octets_num, UCS2List, [], Sequence)->
    %% case lists:split(140-6,UCS2Lits) of
         {List1, List2} = lists:split(140-6,UCS2List),
-        Part = #concat{ref_number = [0], seq_number = [Sequence], ud = List1},
+        Part = #concat{ref_number = [0], seq_number = [Sequence], udl
+                       = 140, ud = List1},
     prepare_concatenated(Octets_num - 134, List2, [ Part | []], Sequence+1);
 
 prepare_concatenated(Octets_num, UCS2List, Acc, Sequence) ->
     case Octets_num < 134 of
         true->
             Part = #concat{ref_number = [0], seq_number = [Sequence],
-    max_number = Sequence, ud = UCS2List},
+    max_number = Sequence, udl = Octets_num+6, ud = UCS2List},
             [ Part | Acc ];
         false ->
             {List1, List2} = lists:split(134,UCS2List),
-            Part = #concat{ref_number = [0], seq_number = [Sequence], ud = List1},
+            Part = #concat{ref_number = [0], seq_number = [Sequence],
+    udl = 140, ud = List1},
             prepare_concatenated(Octets_num - 134, List2, [ Part | Acc], Sequence+1)
 
     end.
+
+prepare_concatenated(gsm7bit, Septets_num, Gsm7bitList)->prepare_concatenated(gsm7bit, Septets_num,
+                                                     Gsm7bitList, [], 1).
+
+prepare_concatenated(gsm7bit, Septets_num, Gsm7bitList, [], Sequence)->
+   %% case lists:split(140-6,UCS2Lits) of
+        {List1, List2} = lists:split(153,Gsm7bitList),
+        Part = #concat{ref_number = [0], seq_number = [Sequence], udl
+                       = 160, ud = encode_to_7bit_with_fillbit(List1)},
+    prepare_concatenated(gsm7bit, Septets_num - 153, List2, [ Part | []], Sequence+1);
+
+prepare_concatenated(gsm7bit, Septets_num, Gsm7bitList, Acc, Sequence) ->
+    case Septets_num < 153 of
+        true->
+            Part = #concat{ref_number = [0], seq_number = [Sequence],
+    max_number = Sequence, udl = Septets_num +7, ud = encode_to_7bit_with_fillbit(Gsm7bitList)},
+            [ Part | Acc ];
+        false ->
+            {List1, List2} = lists:split(153, Gsm7bitList),
+            Part = #concat{ref_number = [0], seq_number = [Sequence],
+    udl = 160, ud = encode_to_7bit_with_fillbit(List1)},
+            prepare_concatenated(Septets_num - 153, List2, [ Part | Acc], Sequence+1)
+
+    end.
+   
+
+encode_to_7bit_with_fillbit(List1)->
+    Gsm7bit = sms_7bit_encoding:to_7bit(List1),
+    Out = sms_7bit_encoding:add_fillbit_to_7bit(Gsm7bit),
+    binary_to_list(Out).
+
 
 -spec check_concatenation() -> {true, tuple()} | {false, 0}.
 check_concatenation()->

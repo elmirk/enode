@@ -98,6 +98,7 @@ create_sms_submits(Tp_da, Key) ->
                     
                 ?dcs_7bit ->
                     UdFull = merge_all_ud(Sorted),
+                    io:format("merged ud = ~p~n", [UdFull]),
                     case H#sm_rp_ui.oa_type of
                         ?oa_numeric ->
                             MsisdnDigits = bcd:decode(msisdn, H#sm_rp_ui.oa_data),

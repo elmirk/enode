@@ -85,6 +85,7 @@
 	 test3/0,
 	 parse/1,
          check_concatenation/0,
+         check_sms_type/0,
          prepare_concatenated/2,
 	 prepare_concatenated/3,
          create_sms_submit/2,
@@ -139,6 +140,8 @@
 
 %% input - binary sm_rp_ui
 %% output - sms_deliver record 
+%% we never parse sms_submit
+%% but we parse sms_submit_report from SMSC TMT (should parse)
 parse(Sm_rp_ui)->
 
     <<Flags:8, Rest/binary>> = Sm_rp_ui,
@@ -207,13 +210,15 @@ parse_sms_deliver(Udhi, Data)->
     <<Header:HeaderLength/binary, Ud_wo_header/binary >> = Other,
 
     Ud2 = case Dcs of
-              16#08->
+              ?dcs_ucs2 ->
                   "ucs2";
-              16#00 ->
+              ?dcs_7bit ->
                   sms_7bit_encoding:from_7bit(Ud);
               %%akbars send sms with this DCS
               16#01 ->
-                  sms_7bit_encoding:from_7bit(Ud)
+                  sms_7bit_encoding:from_7bit(Ud);
+              ?dcs_8bit_class0 ->
+                  "special_sms"
           end,
 
     #sm_rp_ui{message_type = sms_deliver,
@@ -306,9 +311,12 @@ create_sms_submit(Sms_deliver, Tp_da)->
 
     {NewUDL, NewUD} = case Sms_deliver#sm_rp_ui.udhi of
 			  1->
-			      Flags = 16#51,
-                              %%check_ud_header(Sms_deliver#sm_rp_ui.ud),
-			      {Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud};
+			      %%Flags = 16#51,
+			      Flags = 16#11,
+                              {NewUdL, NewUd} = check_ud_header(Sms_deliver#sm_rp_ui.ud),
+			      NewSMSDeliver =
+                                  Sms_deliver#sm_rp_ui{udl=NewUdL, ud = NewUd},
+			      construct_new_ud(NewSMSDeliver);
 			  0 ->
 			      Flags = 16#11,
 			      construct_new_ud(Sms_deliver)
@@ -345,7 +353,8 @@ create_sms_submit(Sms_deliver, Tp_da)->
                                     ++ A#concat.ie_identifier ++ A#concat.length_of_iea ++ A#concat.ref_number ++
                                                             [NewUDL] ++
                                                             A#concat.seq_number ++ A#concat.ud),
-                                    L = byte_size(UD),
+                              %%      L = byte_size(UD),
+                                    L = A#concat.udl,
                                     Bin7 = << Bin6/binary, L:8 >>,
                                     Bin8 = << Bin7/binary, UD/binary>>,
                                     io:format("sm rp ui itog = ~p~n",[Bin8]),
@@ -380,7 +389,7 @@ construct_new_ud(Sms_deliver)->
 	?oa_numeric ->
             MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
             {UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
-			   8 ->
+			   ?dcs_ucs2 ->
                                %%MsisdnDigits = bcd:decode(msisdn, Sms_deliver#sm_rp_ui.oa_data),
                                List = [ [0, 48 + Digit] || Digit <- MsisdnDigits, Digit < 10],
                                io:format("List = ~w~n", [lists:flatten(List)]),
@@ -390,18 +399,18 @@ construct_new_ud(Sms_deliver)->
 			   %%8 ->
 			       modify_user_data(ucs2, UDPrefix,
 						Sms_deliver#sm_rp_ui.udl,
-						Sms_deliver#sm_rp_ui.ud,
-						Sms_deliver#sm_rp_ui.udhi
+						Sms_deliver#sm_rp_ui.ud
+					%%	Sms_deliver#sm_rp_ui.udhi
 					       );
 			   _Other ->
                                %%convert each digit to ascii code of digit
                                List = [ 48 + Digit  || Digit <- MsisdnDigits, Digit < 10],
                                %%append ":" to List
-                               UDPrefix = List++[58],
+                               UDPrefix = List++[58, 32],
                                modify_user_data(gsm7bit, UDPrefix,
 						Sms_deliver#sm_rp_ui.udl,
-						Sms_deliver#sm_rp_ui.ud_ascii,
-						Sms_deliver#sm_rp_ui.udhi
+						Sms_deliver#sm_rp_ui.ud_ascii
+				%%		Sms_deliver#sm_rp_ui.udhi
 					       )
 			       %%{Sms_deliver#sm_rp_ui.udl, Sms_deliver#sm_rp_ui.ud}
 		       end;
@@ -409,31 +418,41 @@ construct_new_ud(Sms_deliver)->
             Oa_ascii = sms_7bit_encoding:from_7bit(Sms_deliver#sm_rp_ui.oa_data),
 	    {UDL,UD} = case Sms_deliver#sm_rp_ui.dcs of
 			   ?dcs_ucs2 ->
-                               {Sms_deliver#sm_rp_ui.udl,Sms_deliver#sm_rp_ui.ud};
+                               List = [ [0, Char] || Char <- Oa_ascii],
+                               UDPrefix = lists:flatten(List) ++ [0, 58, 0, 32],
+                               modify_user_data(ucs2, UDPrefix,
+						Sms_deliver#sm_rp_ui.udl,
+						Sms_deliver#sm_rp_ui.ud
+					%%	Sms_deliver#sm_rp_ui.udhi
+					       );
+			  %%{Sms_deliver#sm_rp_ui.udl,Sms_deliver#sm_rp_ui.ud};
                            ?dcs_7bit ->
-                               UDPrefix = Oa_ascii ++ [58],
+                               UDPrefix = Oa_ascii ++ [58, 32],
                                modify_user_data(gsm7bit, UDPrefix,
 						Sms_deliver#sm_rp_ui.udl,
-						Sms_deliver#sm_rp_ui.ud_ascii,
-						Sms_deliver#sm_rp_ui.udhi
+						Sms_deliver#sm_rp_ui.ud_ascii
+				%%		Sms_deliver#sm_rp_ui.udhi
 					       );
                            ?dcs_akbars -> 
-                               UDPrefix = Oa_ascii ++ [58],
+                               UDPrefix = Oa_ascii ++ [58, 32],
                                modify_user_data(gsm7bit, UDPrefix,
 						Sms_deliver#sm_rp_ui.udl,
-						Sms_deliver#sm_rp_ui.ud_ascii,
-						Sms_deliver#sm_rp_ui.udhi
+						Sms_deliver#sm_rp_ui.ud_ascii
+				%%		Sms_deliver#sm_rp_ui.udhi
 					       )
                        end          
     end,
     {UDL, UD}.
 
-
-modify_user_data(ucs2, UDPrefix, Udl, Ud, Udhi)->
-    case Udhi of
-	0 ->
+%%do not analyze udhi
+%% real cases - single sms but header exist - tenet console
+%% header doesn't exist - single sms
+%% modify_user_data(ucs2, UDPrefix, Udl, Ud, Udhi)->
+modify_user_data(ucs2, UDPrefix, Udl, Ud)->
+   %% case Udhi of
+%%	0 ->
 	    Length = length(UDPrefix),   
-	    if Length + Udl < 140 ->
+	    if Length + Udl =< 140 ->
 		    {Length + Udl,
 		     list_to_binary(UDPrefix ++ binary_to_list(Ud))};
 	       true ->
@@ -441,18 +460,44 @@ modify_user_data(ucs2, UDPrefix, Udl, Ud, Udhi)->
                     SMSlist = prepare_concatenated(Length + Udl, UDPrefix ++ binary_to_list(Ud)),
 		   {length(SMSlist), SMSlist}
 	    end; 
-	1 ->
-	    {Udl, Ud}
-    end;
-modify_user_data(gsm7bit, UDPrefix, Udl, Ud_ascii, Udhi) ->
+%%	1 ->
+%%	    {Udl, Ud}
+%%    end;
+%% modify_user_data(gsm7bit, UDPrefix, Udl, Ud_ascii, Udhi) ->
+modify_user_data(gsm7bit, UDPrefix, _Udl, Ud_ascii) ->
     NewUDascii = UDPrefix ++ Ud_ascii,
-    NewUD7bit = sms_7bit_encoding:to_7bit(NewUDascii),
-    {length(NewUDascii), NewUD7bit}.
-
+    io:format("NewUDAscii = ~p~n", [NewUDascii]),
+    if length(NewUDascii) =<160 ->
+            NewUD7bit = sms_7bit_encoding:to_7bit(NewUDascii),
+            {length(NewUDascii), NewUD7bit};
+       true ->
+            io:format("NewUDAscii = ~p, true case ~n", [NewUDascii]),
+            SMSlist = prepare_concatenated(gsm7bit, length(NewUDascii),
+                                           NewUDascii),
+            {length(SMSlist), SMSlist}
+    end.
 %%TODO this
+%% actually when smsr decide that simgle sms incoming
+%% this function shouldn't called
+%% but when send sms over smsc tmt console
+%% then it logically single but smsc sent it like concatenated, that
+%% is why we should analyze header and delete header at all from user data
 check_ud_header(UserData)->
-    %%<< Udhl:8, Rest/binary >>  = UserData,
-   ok.
+    << Udhl:8, Rest/binary >>  = UserData,
+
+    case Udhl of
+        5 -> remove_header_from_ud(Rest);
+        
+        _->not_concatenated
+    end.
+        
+
+remove_header_from_ud(<< 0, 3, 1, 1, 1, Rest/binary >>)->
+    {byte_size(Rest), Rest};
+remove_header_from_ud(_Other)->
+    {0, <<>>}.
+
+
 
 %% for case when test modification lead to use concatenated
 %% then we need to prepare concatenated sms objects
@@ -500,6 +545,7 @@ prepare_concatenated(gsm7bit, Septets_num, Gsm7bitList, [], Sequence)->
         {List1, List2} = lists:split(153,Gsm7bitList),
         Part = #concat{ref_number = [0], seq_number = [Sequence], udl
                        = 160, ud = encode_to_7bit_with_fillbit(List1)},
+    io:format("List1 = ~p List2 = ~p~n", [List1, List2]),
     prepare_concatenated(gsm7bit, Septets_num - 153, List2, [ Part | []], Sequence+1);
 
 prepare_concatenated(gsm7bit, Septets_num, Gsm7bitList, Acc, Sequence) ->
@@ -512,7 +558,7 @@ prepare_concatenated(gsm7bit, Septets_num, Gsm7bitList, Acc, Sequence) ->
             {List1, List2} = lists:split(153, Gsm7bitList),
             Part = #concat{ref_number = [0], seq_number = [Sequence],
     udl = 160, ud = encode_to_7bit_with_fillbit(List1)},
-            prepare_concatenated(Septets_num - 153, List2, [ Part | Acc], Sequence+1)
+            prepare_concatenated(gsm7bit, Septets_num - 153, List2, [ Part | Acc], Sequence+1)
 
     end.
    
@@ -520,6 +566,7 @@ prepare_concatenated(gsm7bit, Septets_num, Gsm7bitList, Acc, Sequence) ->
 encode_to_7bit_with_fillbit(List1)->
     Gsm7bit = sms_7bit_encoding:to_7bit(List1),
     Out = sms_7bit_encoding:add_fillbit_to_7bit(Gsm7bit),
+    io:format("userdata with fill bit = ~p~n", [binary_to_list(Out)]),
     binary_to_list(Out).
 
 
@@ -534,6 +581,25 @@ check_concatenation()->
         {?udhi_false, _Other} ->
             {false, 0}
     end.
+
+-spec check_sms_type() -> {sms_part, tuple()} | {sms_with_header, 0} |
+                          {sms_no_header, 0}.
+check_sms_type()->
+    Sms_deliver = get(sm_rp_ui_mv),
+    case {Sms_deliver#sm_rp_ui.udhi, Sms_deliver#sm_rp_ui.header_length}  of
+        {?udhi_true, 5} ->
+            check_header(Sms_deliver#sm_rp_ui.header, Sms_deliver#sm_rp_ui.ud_wo_header);
+        {?udhi_true, _Other} ->
+            {sms_with_header, 0};
+        {?udhi_false, _Other} ->
+            {sms_no_header, 0}
+    end.
+
+check_header(<< 0, 3, _Ref:8, _Max:8, Seq:8 >>, Ud) ->
+    FullUd = {Seq, binary_to_list(Ud)},
+    {sms_part, FullUd};
+check_header(<< _IEAid:8, _IEAlength:8, _Ref:8, _Max:8, _Seq:8 >>, _Ud)->
+    {sms_with_header, 0}.
 
 
 %% TODO - should do more carefully second clause

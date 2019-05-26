@@ -12,9 +12,17 @@
 -define(mapdt_close_req, 3).
 -define(mapdt_close_ind, 4).
 -define(mapdt_delimiter_req, 5).
+-define(mapdt_delimiter_ind, 6).
 -define(mapdt_u_abort_req, 7).
+-define(mapdt_u_abort_ind, 8).
+-define(mapdt_p_abort_ind, 9).
+-define(mapdt_notice_ind, 10).
 -define(mapdt_open_rsp, 129).
 
+%%MAP-OPEN-CNF MAPDT_OPEN_CNF 130 0x82
+
+%% TBD!! how all it works? without next def?
+%%MAP-OPEN-CNF MAPDT_OPEN_CNF 130 0x82
 
 %% service primitive types
 -define(empty_service_portion, 16#00). %%if incoming components list
@@ -33,7 +41,8 @@
 -define(mapst_fwd_sm_ind, 16#04). %%MAP-FORWARD-SHORT-MESSAGE-IND (versions 1 and 2)
 -define(mapst_rpt_smdst_req, 16#05). %%MAP-REPORT-SM-DELIVERY-STATUS-REQ
 -define(mapst_rpt_smdst_ind, 16#06). %%MAP-REPORT-SM-DELIVERY-STATUS-IND
-
+-define(mapst_rpt_smdst_rsp, 16#85). %%MAP-REPORT-SM-DELIVERY-STATUS-RSP
+-define(mapst_rpt_smdst_cnf, 16#86). %%MAP-REPORT-SM-DELIVERY-STATUS-CNF
 
 %% MAP Dialogue Primitive Parameters
 

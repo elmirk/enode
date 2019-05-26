@@ -50,6 +50,9 @@ from_7bit(Bin) ->
 %%from_7bit(<<>>,<<13>>,Out,8) ->
 from_7bit(<<>>,<<32>>,Out,8) ->
     binary_to_list(Out);
+%%fix to delete 0 from last byte if exist
+from_7bit(<<>>,<<0>>,Out, 8) ->
+    binary_to_list(Out);
 from_7bit(<<>>,<<CharN>>,Out,8) ->
     binary_to_list(<<Out/binary,CharN:8>>);
 from_7bit(<<>>,<<0>>,Out,_Cntr) ->
@@ -87,7 +90,15 @@ list_to_binary(RetL).
 
 add_fillbit_to_7bit(Gsm7bit)->
 
-L = [ { (X bsl 1) band 16#ff, (X band 16#80) bsr 7 } || <<X>> <= Gsm7bit],
-{Out, _} = lists:foldl(fun({A, B}, {Acc, Flagin})-> Out7 = A bor Flagin, {[Out7 | Acc],B} end, {[], 0}, L),
-list_to_binary(lists:reverse(Out)).
+    L = [ { (X bsl 1) band 16#ff, (X band 16#80) bsr 7 } || <<X>> <= Gsm7bit],
+    {Out, Last} = lists:foldl(fun({A, B}, {Acc, Flagin})-> 
+                                   Out7 = A bor Flagin,
+                                   {[Out7 | Acc], B}
+                           end, {[], 0}, L),
+    if Last == 1 ->
+            list_to_binary(lists:reverse(Out) ++ [1]);
+       true ->
+            list_to_binary(lists:reverse(Out))
+    end.
+%%list_to_binary(lists:reverse(Out2)).
 

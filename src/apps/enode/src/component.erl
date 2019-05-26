@@ -27,11 +27,12 @@
 %% in MT forward SM flow
 handle_service_data([]) ->
     ?empty_service_portion;
-
+%%Components - binary
 handle_service_data(Components)->
 %% TODO !
-    [Component | _Tail] = Components,
-    [ServiceType | Parameters] = binary:bin_to_list(Component),
+    %%[Component | _Tail] = Components,
+    
+    [ServiceType | Parameters] = binary:bin_to_list(Components),
     parse_service_data(Parameters),
     put(service_type, ServiceType), %% when PD not defined then this will return undefined
     io:format("service type in worker = ~p~n", [ServiceType]),

@@ -19,20 +19,18 @@
 -define(smsc_sccp_gt, [16#0b, 16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#10, 0]).
 
 
-
+%%Components is binary
 invoke_reportSM_DeliveryStatus(Components)->
     
-    io:format("in sri sm req function ~n"),
 %% p010b09060704000001001403010b1206001104970566152000030b120800110497056615200900
 %% also we should choos dlg id for outgoing dlgs
     DlgPayload = create_map_open_dlg_req_payload(),
-    gen_server:cast(?enode_broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(DlgPayload)}),
+    %%gen_server:cast(?enode_broker, {self(), ?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(DlgPayload)}),
+    ODlgId = gen_server:call(?enode_broker, {?map_msg_dlg_req, ?mapdt_open_req, list_to_binary(DlgPayload)}),
 %% payload here
 
-io:format("in srim sm req function after cast ~n"),
- 
     SrvPayload = create_map_srv_req_primitive(mapst_rpt_smdst_req, Components),
-    gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_rpt_smdst_req, SrvPayload}).
+    gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_rpt_smdst_req, ODlgId, SrvPayload}).
 
 
 %% create payload for MAP_OPEN_REQ
@@ -60,14 +58,16 @@ create_map_open_dlg_req_payload(List, sccp_calling) ->
 
 
 
--spec create_map_srv_req_primitive( atom(),[binary()] ) -> binary().
+-spec create_map_srv_req_primitive( atom(), binary() ) -> binary().
 create_map_srv_req_primitive(mapst_rpt_smdst_req, Components)->
-    [Component] = Components,
+    %%[Component] = Components,
     %%should remove last 0 from binary
     %%New = binary_part(Component, {0, byte_size(Component)-1}),
     %%Out = <<New/binary, ?mappn_dialog_type, 1, ?mapdt_delimiter_req,0>>,
     %%io:format("Out = ~p~n", [Out]),
     %%Out.
-    <<_First:8, Rest/binary>> = Component,
-    Out = << ?mapst_rpt_smdst_req, Rest/binary, ?mappn_dialog_type, 1 , ?mapdt_delimiter_req, 0>>,
+    <<_First:8, Rest/binary>> = Components,
+    %%should remove terminating zero byte from binary
+    Rest2 = binary_part(Rest, {0, byte_size(Rest)-1}),
+    Out = << ?mapst_rpt_smdst_req, Rest2/binary, ?mappn_dialog_type, 1 , ?mapdt_delimiter_req, 0>>,
     Out.

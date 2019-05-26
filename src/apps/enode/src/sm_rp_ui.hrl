@@ -5,9 +5,10 @@
 -define(udhi_true, 1).
 -define(udhi_false, 0).
 
--define(dcs_ucs2, 16#08).
--define(dcs_7bit, 16#00). 
--define(dcs_akbars, 16#01).
+-define(dcs_ucs2,        16#08).
+-define(dcs_7bit,        16#00). 
+-define(dcs_akbars,      16#01).
+-define(dcs_8bit_class0, 16#04). %%used in wap push mms notification to ME
 
 -define(sms_deliver, 0).
 -define(sms_submit, 1).

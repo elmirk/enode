@@ -13,7 +13,9 @@ ENV REBAR3_VERSION="3.9.1"
 LABEL author="Elmir Karimullin"
 
 RUN set -xe \
-	&& apk --no-cache --update add git 
+	&& apk --no-cache --update add git tzdata \
+        && cp /usr/share/zoneinfo/Europe/Moscow /etc/localtime \
+        && echo "Europe/Moscow" >  /etc/timezone
 
 COPY src /opt
 WORKDIR /opt
@@ -27,7 +29,13 @@ RUN rebar3 release
 CMD /opt/_build/default/rel/enode/bin/enode console
 
 FROM erlang:alpine as prod
+
+ENV TERM=xterm
+
 WORKDIR /opt
 COPY --from=dev /opt/_build /opt/_build
 COPY --from=dev /opt/config /opt/config
-#CMD ["./app"]
+COPY --from=dev /etc/localtime /etc/localtime
+COPY --from=dev /etc/timezone /etc/timezone
+
+CMD /opt/_build/default/rel/enode/bin/enode foreground

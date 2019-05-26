@@ -3,6 +3,7 @@
 
 
 -export([start/0,
+         stop/0,
          get_cnum/1]).
 
 -record(mv, {tarantool}).
@@ -13,6 +14,11 @@ start()->
                 _Other -> put(mv_subscribers, #mv{tarantool = fail})
             end
     .
+
+stop() ->
+    Mv = get(mv_subscribers),
+    TTconn = Mv#mv.tarantool,
+    taran:connect_close(TTconn).
 
 %%--------------------------------------------------------------------
 %% @doc

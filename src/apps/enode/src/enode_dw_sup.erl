@@ -65,7 +65,7 @@ init({M,F,A}) ->
 		 intensity => MaxRestart,
 		 period => MaxTime},
 
-    AChild = #{id => dw_sup,
+    AChild = #{id => dyn_worker,
 	       start => {M,F,A},
 	       restart => temporary,
 	       shutdown => 5000, %%brutal_kill,

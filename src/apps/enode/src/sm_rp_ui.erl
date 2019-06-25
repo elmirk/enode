@@ -193,11 +193,7 @@ parse_sms_deliver(Udhi, Data)->
 	    {Oa_data,Tail} = decode_oa_carefully(_Other, OAlength, Rest)
     end,
 
-%%Slen = 56,
-%% Scts - 7 octets
 << Pid:8, Dcs:8, Scts:7/binary, Udl:8, Ud/binary >>  = Tail,
-%%<<Scts:7/binary, R2/binary >> = R,
-%%<< Udl:8, Ud/binary >> = R2,
 
     <<HeaderLength:8, Other/binary >> = case Udhi of
                                             ?udhi_true->

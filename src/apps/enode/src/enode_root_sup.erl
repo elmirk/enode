@@ -65,7 +65,14 @@ init({Name, Limit, MFA}) ->
 	       type => worker,
 	       modules => [enode_broker]},
 
-    {ok, {SupFlags, [AChild]}}.
+    MaintainerCh = #{id => maintainer,
+	       start => {maintainer, start_link, []},
+	       restart => temporary,
+	       shutdown => 5000,
+	       type => worker,
+	       modules => [maintainer]},
+
+    {ok, {SupFlags, [AChild, MaintainerCh]}}.
 
 %%%===================================================================
 %%% Internal functions

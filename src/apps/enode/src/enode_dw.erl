@@ -26,7 +26,7 @@
 %%cid for pair msisdn&smsc which we got from incoming SRI_SM request 
 
 %% API
--export([start_link/1]).
+-export([start_link/2]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -37,13 +37,6 @@
 -include("enode_broker.hrl").
 
 -define(SERVER, ?MODULE).
-
-%% definest should be checked before production!!
-%% !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
-%% -define(mapdt_open_ind, 2).
-%%-define(mapdt_open_rsp, 16#81).
-%%-define(mapdt_open_req, 16#01).
-%%-define(mappn_result, 9).
 
 -define(sccp_called, 1).
 -define(sccp_calling, 3).
@@ -102,13 +95,14 @@
 %% Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec start_link(term()) -> {ok, Pid :: pid()} |
-		      {error, Error :: {already_started, pid()}} |
-		      {error, Error :: term()} |
-		      ignore.
-start_link(DlgId) ->
+-spec start_link(StartLevel :: atom(), DlgId :: integer())
+                -> {ok, Pid :: pid()} |
+                   {error, Error :: {already_started, pid()}} |
+                   {error, Error :: term()} |
+                   ignore.
+start_link(StartLevel,DlgId) ->
 %% we should start dynamic worker without registered name
-    gen_server:start_link(?MODULE, DlgId, []).
+    gen_server:start_link(?MODULE, [StartLevel, DlgId], []).
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
@@ -125,8 +119,8 @@ start_link(DlgId) ->
 			      {stop, Reason :: term()} |
 			      ignore.
 %% this is from skeleton init([]) ->
-init(DlgId)->
-    %%process_flag(trap_exit, true),
+init([initial_start, DlgId])->
+
 %%    {ok, TTconn} = taran:connect(),
 
 %%    State = case taran:connect() of
@@ -514,7 +508,6 @@ terminate({shutdown, sri_sm_ok} , _State) ->
     ok;
 
 terminate({shutdown, mt_sms_part} , _State) ->
-    %%subscribers:stop(),
     io:format("gen_server with pid = ~p terminated after mt_sms_part handling ~n",[self()]),
     ok;
 

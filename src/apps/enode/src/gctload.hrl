@@ -71,6 +71,8 @@
 -define(mappn_sm_rp_mti, 16#77). 
 -define(mappn_sm_rp_smea, 16#78).
 -define(mappn_sm_deliv_outcome, 16#1b). %%SM delivery outcome
+-define(mappn_deliv_fail_cse, 16#1f). %%SM delivery failure cause
+
 
 %%%
 %% mappn_result values

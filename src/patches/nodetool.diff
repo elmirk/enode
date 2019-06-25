@@ -1,0 +1,14 @@
+--- nodetool	2019-03-22 23:51:12.105140739 +0300
++++ nodetool2	2019-06-14 23:10:12.534613712 +0300
+@@ -137,9 +137,9 @@
+ append_node_suffix(Name, Suffix) ->
+     case re:split(Name, "@", [{return, list}, unicode]) of
+         [Node, Host] ->
+-            list_to_atom(lists:concat([Node, Suffix, os:getpid(), "@", Host]));
++            list_to_atom(lists:concat([Node, Suffix, "@", Host]));
+         [Node] ->
+-            list_to_atom(lists:concat([Node, Suffix, os:getpid()]))
++            list_to_atom(lists:concat([Node, Suffix]))
+     end.
+ 
+ %%

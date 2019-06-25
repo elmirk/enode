@@ -5,6 +5,9 @@
 # should we turn off dev_mode in relx for production?
 # dev stage run with console
 
+#to build only DEV target use
+#docker build --target dev -t enode:test2 .
+
 FROM erlang:alpine as dev
 
 #we use rebar 3.9.0, can check by rebar3 version
@@ -21,21 +24,19 @@ COPY src /opt
 WORKDIR /opt
 RUN rebar3 release
 
-# WORKDIR /opt/rebar3
-# RUN ["/opt/rebar3/bootstrap"]
-# RUN install -v ./rebar3 /usr/local/bin/
-
-#CMD erl -name enode@localhost -setcookie smsrouter
 CMD /opt/_build/default/rel/enode/bin/enode console
 
 FROM erlang:alpine as prod
 
-ENV TERM=xterm
+ENV TERM=xterm-256color
 
 WORKDIR /opt
-COPY --from=dev /opt/_build /opt/_build
-COPY --from=dev /opt/config /opt/config
+
 COPY --from=dev /etc/localtime /etc/localtime
 COPY --from=dev /etc/timezone /etc/timezone
+COPY --from=dev /opt/color_prompt.sh /etc/profile.d/
+COPY --from=dev /opt/.shinit /root/
+COPY --from=dev /opt/config /opt/config
+COPY --from=dev /opt/_build /opt/_build
 
 CMD /opt/_build/default/rel/enode/bin/enode foreground

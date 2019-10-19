@@ -36,8 +36,6 @@
 -include("gctload.hrl").
 -include("enode_broker.hrl").
 
--define(SERVER, ?MODULE).
-
 -define(sccp_called, 1).
 -define(sccp_calling, 3).
 -define(ac_name, 11).
@@ -45,20 +43,24 @@
 -define(smsr_sccp_gt, [16#0b, 16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#20, 16#09]).
 -define(smsc_sccp_gt, [16#0b, 16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#10, 0]).
 
+
+-define(DLG_STATE_OPEN_CONFIRMED, [{state, open_confirmed}]).
+-define(DLG_STATE_OPEN_WAIT_FOR_DELIMIT, [{state, open_waiting_for_delimit}]).
+-define(DLG_STATE_WAIT_FOR_DELIMIT, [{state, waiting_for_delimit}]).
 %%used in MO_FORWARD_SM, actually SMSC
 %%with type at the beginning
 -define(sm_rp_da, [16#17, 16#09, 16#04, 16#07, 16#91, 16#97, 16#05, 16#66, 16#15, 16#10, 16#f0]).
 
 -record(state, {subscriber_id, %%msisdn of subscirber, B num
-                dlg_id,        %%dialog id, SRI_SM from HLR
+                dlg_id,        %%root dialog id, SRI_SM from HLR
                                %%or MT_FWD_SM from SMSC spawn the worker
           %%      tarantool,     %%connection to TT
                 components =[],
                 sccp_calling,
                 sccp_called,
                 ac_name,
-                dlg_state,
-                dlgs,  %% orddict [{dlg_id, #dlg_info}]
+          %%      dlg_state,
+                dlgs,  %% orddict [{DlgID1,[{state,open},{timestamp,15}]},{DlgID2,[{timestamp,15}]}]
                 wclass}).
 %% wclass types:
 %% worker class defined after component data handling
@@ -120,9 +122,6 @@ start_link(StartLevel,DlgId) ->
 			      ignore.
 %% this is from skeleton init([]) ->
 init([initial_start, DlgId])->
-
-%%    {ok, TTconn} = taran:connect(),
-
 %%    State = case taran:connect() of
 %%                {ok, TTconn} -> #state{dlg_id = DlgId, tarantool = TTconn};
 %%                _Other -> #state{dlg_id = DlgId, tarantool = fail}
@@ -169,11 +168,9 @@ handle_call(_Request, _From, State) ->
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: term(), NewState :: term()}.
 %%--------------------------------------------------------------------
-%% Process received dialog_open_ind
+%% dialog_open_ind with dlg_open primitive
 %%--------------------------------------------------------------------
 handle_cast({dlg_ind_open, DlgId, Request}, State) ->
-    io:format("[~p]receive dlg ind open smsr worker ~p~n",[self(),Request]),
-    %%io:format("i have state already ~p~n", [State]),
     parse_data(binary:bin_to_list(Request)),
     io:format("sccp_calling from PD = ~p~n",[get(sccp_calling)]),
     io:format("sccp_called from PD = ~p~n",[get(sccp_called)]),
@@ -194,86 +191,52 @@ handle_cast({dlg_ind_open, DlgId, Request}, State) ->
 %%orddict:store(DlgId, open, Dlgs),
 %%TBD should check if this dialog already exist and opened and do
 %% something in this case
-    NewState = State#state{dlg_state = open, dlgs =
-                               orddict:append(DlgId, {state, open}, Dlgs)},
-
+    NewState = State#state{dlgs = orddict:append(DlgId, {state, open}, Dlgs)},
     {noreply, NewState};
 
 %%--------------------------------------------------------------------
 %% Case - receive empty TCAP-BEGIN
 %%--------------------------------------------------------------------
-handle_cast({delimit_ind, _Request}, State = #state{dlg_state = open}) ->
-%%    io:format("srv_ind received ~n"),
-%%    Components = State#state.components,
-%%    NewState = State#state{dlg_state = components = [ Request | Components ]},
-%%    ok = parse_srv_data(binary:bin_to_list(Request)),
-%%   io:format("invoke_id from PD = ~p~n",[get(invoke_id)]),
-%%    io:format("msisdn from PD = ~p~n",[get(msisdn)]),
-%%    io:format("sm rp pri name = ~p~n", [get(sm_rp_pri)]),
-%%    io:format("sc addr = ~p~n", [get(sc_addr)]),
+%%handle_cast({delimit_ind, _Request}, State = #state{dlg_state = open}) ->
 
-%% TODO - we receive delimit and we should analyze what kind of component we recevied bevoe in SRV_IND
-%% component should be saved in State like component list
-%% Payload here should be like
-    Payload = create_map_open_rsp_payload(),
-    DlgId = State#state.dlg_id,
-    gen_server:cast(?enode_broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
-    send_continue(DlgId),
+%%    Payload = create_map_open_rsp_payload(),
+%%    DlgId = State#state.dlg_id,
+%%    gen_server:cast(?enode_broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
+%%    send_continue(DlgId),
 
-    NewState = State#state{dlg_state = open_confirmed},
+%%    NewState = State#state{dlg_state = open_confirmed},
+%%    {noreply, NewState};
+
+handle_cast( {srv_ind, DlgId, Request}, State ) ->
+    
+    %%Dlgs = State#state.dlgs,
+    %%DlgInfo = orddict:fetch(DlgId, Dlgs),
+    %%{state, DlgState} = lists:keyfind(state, 1, DlgInfo),
+    DlgState = get_dlg_state(DlgId, State#state.dlgs),
+
+    NewDlgInfo = case DlgState of
+                     open->
+                         io:format("srv_ind received in state OPEN ~n"),
+                         ?DLG_STATE_OPEN_WAIT_FOR_DELIMIT ++ [{components, Request}];
+                     open_confirmed->
+                         io:format("srv_ind received in state OPEN_CONFIRMED ~n"),
+                         ?DLG_STATE_WAIT_FOR_DELIMIT ++ [{components, Request}]
+                 end,
+%%    NewDlgs = orddict:store(DlgId, NewDlgInfo, Dlgs),
+
+    NewDlgs = update_dlg_info(DlgId, NewDlgInfo, State#state.dlgs),
+    NewState = State#state{dlgs = NewDlgs},
     {noreply, NewState};
-
-%%handle_cast({srv_ind, Request}, State = #state{dlg_state = open} ) ->
-handle_cast({srv_ind, DlgId, Request}, State ) ->
-    %%io:format("srv_ind received in state OPEN ~n"),
-    %%DlgInfo = proplists:get_value(DlgId, State#state.dlgs_info),
-
-    Dlgs = State#state.dlgs,
-    DlgInfo = orddict:fetch(DlgId, Dlgs),
-    {state, DlgState} = lists:keyfind(state, 1, DlgInfo),
-
-
-    case DlgState of
-        open->
-            io:format("srv_ind received in state OPEN ~n"),
-            NewDlgInfo = [{state, open_waiting_for_delimit}, {components, Request}],
-            NewDlgs = orddict:store(DlgId, NewDlgInfo, Dlgs),
-            %%    ok = parse_srv_data(binary:bin_to_list(Request)),
-            %%   io:format("invoke_id from PD = ~p~n",[get(invoke_id)]),
-            %%    io:format("msisdn from PD = ~p~n",[get(msisdn)]),
-            %%    io:format("sm rp pri name = ~p~n", [get(sm_rp_pri)]),
-            %%    io:format("sc addr = ~p~n", [get(sc_addr)]),
-            NewState = State#state{dlgs = NewDlgs},
-            io:format("state in handle srv ind in state OPEN= ~p ~n", [NewState]),
-            {noreply, NewState};
-        open_confirmed->
-            io:format("srv_ind received in state OPEN_CONFIRMED ~n"),
-            NewDlgInfo = [{state, waiting_for_delimit}, {components, Request}],
-            NewDlgs = orddict:store(DlgId, NewDlgInfo, Dlgs),
-            NewState = State#state{dlgs = NewDlgs},
-            io:format("state in handle srv ind in state OPEN CONFIRMED= ~p ~n", [NewState]),
-            {noreply, NewState};
-           
-        _->
-            {noreply, State}
-    end;
-
 %%--------------------------------------------------------------------
 %% Case - receive empty TCAP-BEGIN
 %% and then in the same transaction receive SRV_IND
 %%--------------------------------------------------------------------
-handle_cast({srv_ind, Request}, State = #state{dlg_state = open_confirmed} ) ->
-    io:format("srv_ind received in state OPEN_CONFIRMED ~n"),
-    Components = State#state.components,
-    NewState = State#state{components = [ Request | Components ],
-    dlg_state = waiting_for_delimit},
-%%    ok = parse_srv_data(binary:bin_to_list(Request)),
-%%   io:format("invoke_id from PD = ~p~n",[get(invoke_id)]),
-%%    io:format("msisdn from PD = ~p~n",[get(msisdn)]),
-%%    io:format("sm rp pri name = ~p~n", [get(sm_rp_pri)]),
-%%    io:format("sc addr = ~p~n", [get(sc_addr)]),
-    {noreply, NewState};
-
+%%handle_cast({srv_ind, Request}, State = #state{dlg_state = open_confirmed} ) ->
+%%    io:format("srv_ind received in state OPEN_CONFIRMED ~n"),
+%%    Components = State#state.components,
+%%    NewState = State#state{components = [ Request | Components ],
+%%    dlg_state = waiting_for_delimit},
+%%    {noreply, NewState};
 %% when smsr open outgoing dlg with some network node
 %% then open_confirm received from remote node
 handle_cast({mapdt_open_cnf, DlgId, _Request}, State) ->
@@ -297,59 +260,43 @@ handle_cast({mapdt_open_cnf, DlgId, _Request}, State) ->
 %%handle_cast({delimit_ind, Request}, State = #state{dlg_state = open_waiting_for_delimit}) ->
 handle_cast({delimit_ind, DlgId, _Request}, State) ->
     io:format("delimit ind 1 ~n"),
-
-    %%send DLG_OPEN_RSP
-%%    Payload = create_map_open_rsp_payload(),
-%%    DlgId = State#state.dlg_id,
-
-%%    gen_server:cast(?enode_broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
     
-    Dlgs = State#state.dlgs,
-    DlgInfo = orddict:fetch(DlgId, Dlgs),
-    {state, DlgState} = lists:keyfind(state, 1, DlgInfo),
+%%    Dlgs = State#state.dlgs,
+%%    DlgInfo = orddict:fetch(DlgId, Dlgs),
+%%    {state, DlgState} = lists:keyfind(state, 1, DlgInfo),
 %%    {components, Components} = lists:keyfind(components, 1, DlgInfo),
+
+    DlgState = get_dlg_state(DlgId, State#state.dlgs),
 
     case DlgState of 
         %%receive empty TCAP-BEGIN
         %% Belline use mapv3
         open ->
             Payload = create_map_open_rsp_payload(),
-%%            DlgId = State#state.dlg_id,
             gen_server:cast(?enode_broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
             send_continue(DlgId),
             
-            %% NewState = State#state{dlg_state = open_confirmed},
-            false = lists:keyfind(components, 1, DlgInfo),
-
-           NewDlgInfo = [{state, open_confirmed}],
-            NewDlgs = orddict:store(DlgId, NewDlgInfo, Dlgs),
-            %%    ok = parse_srv_data(binary:bin_to_list(Request)),
-            %%   io:format("invoke_id from PD = ~p~n",[get(invoke_id)]),
-            %%    io:format("msisdn from PD = ~p~n",[get(msisdn)]),
-            %%    io:format("sm rp pri name = ~p~n", [get(sm_rp_pri)]),
-            %%    io:format("sc addr = ~p~n", [get(sc_addr)]),
-            NewState = State#state{dlgs = NewDlgs},
-            {noreply, NewState};
+            %% TODO
+            %% really need following check here?
+            %%false = lists:keyfind(components, 1, DlgInfo),
+            NewDlgs = update_dlg_info(DlgId, ?DLG_STATE_OPEN_CONFIRMED, State#state.dlgs),
+            {noreply, State#state{dlgs = NewDlgs}};
 
         open_waiting_for_delimit ->
     %%send DLG_OPEN_RSP
             io:format("open_waiting_for_delimit ~n"),
             Payload = create_map_open_rsp_payload(),
-            %%    DlgId = State#state.dlg_id,
-            gen_server:cast(?enode_broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
+            gen_server:cast(?enode_broker, {?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
     
-            {components, Components} = lists:keyfind(components, 1, DlgInfo),
+            %%{components, Components} = lists:keyfind(components, 1, DlgInfo),
+            Components = get_component_from_state(DlgId, State#state.dlgs), 
             case handle_service_data(Components,DlgId) of
                 sri_sm ->
                     {stop, {shutdown, sri_sm_ok}, State};
-
                 rsds ->
                     lager:warning("reportSMdeliveryStatus from SMSC received"),
-                    NewDlgInfo = [{state, open_confirmed}],
-                    NewDlgs = orddict:store(DlgId, NewDlgInfo, Dlgs),
-                    NewState = State#state{dlgs = NewDlgs},
-                   
-                    {noreply, NewState};
+                    NewDlgs = update_dlg_info(DlgId, ?DLG_STATE_OPEN_CONFIRMED, State#state.dlgs),
+                    {noreply, State#state{dlgs = NewDlgs}};
                 %%recieved part of sms, stop worker
                 {mt_fsm, mt_sms_part} ->
                        {stop, {shutdown, mt_sms_part}, State};
@@ -358,25 +305,20 @@ handle_cast({delimit_ind, DlgId, _Request}, State) ->
                 {mt_fsm, mt_sms_special} ->
                        {stop, {shutdown, mt_sms_special}, State};
 
-                {mt_fsm, mt_sms_part_mms} ->
-
-                    NewDlgInfo = [{state, open_confirmed}],
-                    NewDlgs = orddict:store(DlgId, NewDlgInfo, Dlgs),
-                    NewState = State#state{dlgs = NewDlgs},
-                    {noreply, NewState};
-
                 {mt_fsm, WClass} ->
-                    NewState = State#state{dlg_state = open_confirmed, wclass
-                                           = WClass},
-                    {noreply, NewState};
-                _Other->
-                    NewState = State#state{dlg_state = open_confirmed},
-                    {noreply, NewState}
+
+                    NewDlgs = update_dlg_info(DlgId, ?DLG_STATE_OPEN_CONFIRMED, State#state.dlgs),
+                    {noreply, State#state{dlgs = NewDlgs, wclass = WClass}};
+
+                Other->
+                    lager:warning("other0=~p",[Other]),
+                    NewDlgs = update_dlg_info(DlgId, ?DLG_STATE_OPEN_CONFIRMED, State#state.dlgs),
+                    {noreply, State#state{dlgs = NewDlgs}}
             end;
         
         waiting_for_delimit ->
-            {components, Components} = lists:keyfind(components, 1, DlgInfo),
-            io:format("waiting_for_delimit ~n"),
+            Components = get_component_from_state(DlgId, State#state.dlgs), 
+            io:format("waiting_for_delimit3 ~n"),
             case handle_service_data(Components, DlgId) of
                 sri_sm ->
                     {stop, {shutdown, sri_sm_ok}, State};
@@ -387,43 +329,22 @@ handle_cast({delimit_ind, DlgId, _Request}, State) ->
                 {mt_fsm, mt_sms_part_mms} ->
 
                     NewDlgInfo = [{state, open_confirmed}],
-                    NewDlgs = orddict:store(DlgId, NewDlgInfo, Dlgs),
-                    NewState = State#state{dlgs = NewDlgs},
-                    {noreply, NewState};
-
+                    NewDlgs = orddict:store(DlgId, NewDlgInfo, State#state.dlgs),
+                    {noreply, State#state{dlgs = NewDlgs}};
 
                 %% mt_sms_part_mms  --- do not stop worker
                 %% mo_sms_concatenated --- do not stop worker,wait all
                 %% returnresult from SMSC TMT
                 {mt_fsm, WClass} ->
-                    NewState = State#state{dlg_state = open_confirmed, wclass
-                                           = WClass},
-                    {noreply, NewState};
-                _Other->
-                    NewState = State#state{dlg_state = open_confirmed},
-                    {noreply, NewState}
-            end
+                    NewDlgs = update_dlg_info(DlgId, ?DLG_STATE_OPEN_CONFIRMED, State#state.dlgs),
+                    {noreply, State#state{dlgs = NewDlgs, wclass = WClass}};
                 
+                Other->
+                    lager:warning("other50=~p",[Other]),
+                    NewDlgs = update_dlg_info(DlgId, ?DLG_STATE_OPEN_CONFIRMED, State#state.dlgs),
+                    {noreply, State#state{dlgs = NewDlgs}}
+            end
     end;
-
-%%--------------------------------------------------------------------
-%% Process received delimit_ind
-%% this is not the case when YOTA smsc send mt fsm in mapv1
-%%--------------------------------------------------------------------
-handle_cast({delimit_ind, DlgId, Request}, State = #state{dlg_state = waiting_for_delimit}) ->
-            io:format("delimit ind 2 ~n");
-
-%%    case handle_service_data(State, DlgId) of
-%%        sri_sm ->
-%%            {stop, {shutdown, sri_sm_ok}, State};
-%%        {mt_fsm, WClass} ->
-%%            NewState = State#state{dlg_state = open_confirmed, wclass
-%%                                   = WClass},
-%%            {noreply, NewState};
-%%        _Other->
-%%            NewState = State#state{dlg_state = open_confirmed},
-%%            {noreply, NewState}
-%%    end;
 
 handle_cast({mapdt_close_ind, DlgId,_Request}, State) ->
 
@@ -431,7 +352,8 @@ handle_cast({mapdt_close_ind, DlgId,_Request}, State) ->
     Dlgs = State#state.dlgs,
     DlgInfo = orddict:fetch(DlgId, Dlgs),
     {state, DlgState} = lists:keyfind(state, 1, DlgInfo),
-    {components, Components} = lists:keyfind(components, 1, DlgInfo),
+    
+    Components = get_component_from_state(DlgId, State#state.dlgs), 
 
     case component:handle_service_data(Components) of
 	?mapst_snd_rtism_cnf ->
@@ -473,10 +395,14 @@ handle_cast({mapdt_close_ind, DlgId,_Request}, State) ->
         ?mapst_rpt_smdst_cnf -> 
             {stop, {shutdown, rpt_smdst_cnf_ok}, State};
 	_Other->
-	    io:format("!!!!!!!!!!!!!!!!!!!!!!!!!1unexpected error ~n"),
+	    lager:error("!!!unexpected error"),
 	    true,
             {stop, normal, State}
-    end.
+    end;
+handle_cast({mapdt_uabort_ind, DlgId, Data}, State) ->
+    DlgState = get_dlg_state(DlgId, State#state.dlgs),
+    lager:error("uabort in worker received in state ~p",[DlgState]),
+    {stop, normal, State}.
      
 %%--------------------------------------------------------------------
 %% @private
@@ -578,53 +504,60 @@ send_continue(DlgId)->
 %%% If we have component data - then we should handle it!
 %%%===================================================================
 handle_service_data(Components,DlgId)->
-
     case component:handle_service_data(Components) of
 	?mapst_snd_rtism_ind ->
-
             subscribers:start(),
-
 	    Msisdn = get(msisdn),
             Smsc = get(sc_addr),
             Key = Msisdn ++ Smsc,
-
             Now = erlang:monotonic_time(),
-
             case ets:lookup(sri_sm, Key) of
                 [] ->
                     io:format("key not found in sri_sm table ~n"),
-                    Cid = get_cid(),
-                    %%                    Result_ = ets:update_counter(sri_sm, Key, {3,1} , {Key,Cid,0});
-                    _Result = ets:insert(sri_sm, {Key, Cid, Now}),
-                    Tp_da = subscribers:get_cnum(Msisdn),
-                    ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, Tp_da});
-          
-                [{_, OldCid, Timestamp}] ->
-
-                    TimeDiff = erlang:convert_time_unit(Now - Timestamp, native,
-                                                        second),
-                    
-                    case TimeDiff < ?cid_update_interval of
-                        
-                        false ->
-                            io:format("need update cid ~n"),
+                    %% Cid = get_cid(),
+                    %% Result_ = ets:update_counter(sri_sm, Key, {3,1} , {Key,Cid,0});
+                    %% Result = ets:insert(sri_sm, {Key, Cid, Now}),
+                    case subscribers:get_cnum(Msisdn) of
+                        %%TODO:should send some reason in srm_sm_ack or dialog abort?
+                        [] ->
+                            lager:error("failed to get cnum for msisdn:~p",[Msisdn]);
+                        Tp_da->
                             Cid = get_cid(),
                             ets:insert(sri_sm, {Key, Cid, Now}),
-                            Tp_da = subscribers:get_cnum(Msisdn),
-                            ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, Tp_da});
-                        true ->
-                            Cid = OldCid,
-                            io:format("use same cid just update timestamp ~n"),
-                            ets:update_element(sri_sm, Key, {3, Now})
+                            ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, Tp_da}),
+                            send_sri_sm_ack(Components, DlgId, Cid)
+                    end;
+                [{_, OldCid, Timestamp}] ->
+                    case subscribers:get_cnum(Msisdn) of
+                        %%TODO:should send some reason in srm_sm_ack or dialog abort?
+                        [] ->
+                            lager:error("failed to get cnum for msisdn:~p",[Msisdn]),
+                            ets:delete(sri_sm, Key);
+                        Tp_da->
+                            TimeDiff = erlang:convert_time_unit(Now -
+                                                                    Timestamp,
+                                                                native,
+                                                                second),
+                            %%Cid = get_cid(),
+                            %%ets:insert(sri_sm, {Key, Cid, Now}),
+                            %%ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, Tp_da}),
+                            %%send_sri_sm_ack(Components, DlgId, Cid),
+                            case TimeDiff < ?cid_update_interval of
+                                false ->
+                                    io:format("need update cid ~n"),
+                                    Cid = get_cid(),
+                                    ets:insert(sri_sm, {Key, Cid, Now});
+                                true ->
+                                    io:format("use same cid just update timestamp ~n"),
+                                    Cid = OldCid,
+                                    ets:update_element(sri_sm, Key, {3, Now})
+                            end,
+                            ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, Tp_da}),
+                            send_sri_sm_ack(Components, DlgId, Cid)
                     end
-
-%%                    Result_ = ets:update_counter(sri_sm, Key, {3,1})
             end,
-%%            Tp_da = subscribers:get_cnum(Msisdn),
-%%	    ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, Tp_da}),
             io:format("Cid table in sri_sm part = ~p~n", [ets:tab2list(cid)]),
 %%	    sri_sm_req(State#dialog.components);
-	    send_sri_sm_ack(Components, DlgId, Cid),
             sri_sm;
 
         ?mapst_rpt_smdst_ind ->
@@ -917,7 +850,7 @@ handle_service_data(Components,DlgId)->
             {mt_fsm, WClass};
         
 	_Other->
-	    io:format("suddenly true ~n"),
+	    lager:error("suddenly true ~n"),
 	    true
     end.
 
@@ -945,8 +878,6 @@ io:format("in srim sm req function after cast ~n"),
 %% @end
 %%--------------------------------------------------------------------
 send_sri_sm_ack(Components, DlgId, Cid)->
-%%    Payload = map_msg_srv_req(),
-%%    Cid = get(cid),
     Fimsi= bcd:encode(imsi, Cid),
     Payload = construct_sri_sm_ack(Fimsi),
 %%    Payload x= [16#81,  16#0e, 16#01, 16#b5,   16#12, 16#08, 16#52, 16#20,
@@ -1307,7 +1238,20 @@ map_srv_req_primitive(snd_rtism_req, Components)->
 get_cid()->
     gen_server:call(?enode_broker, get_cid).
 %%--------------------------------------------------------------------
-
+%% helper functions
 %%--------------------------------------------------------------------
+-spec get_dlg_state(DlgId :: integer(), Dlgs :: [tuple()])-> atom().
+get_dlg_state(DlgId, Dlgs)->
+    DlgInfo = orddict:fetch(DlgId, Dlgs),
+    {state, DlgState} = lists:keyfind(state, 1, DlgInfo),
+    DlgState.
 
+
+update_dlg_info(DlgId, NewDlgInfo, Dlgs)->    
+     orddict:store(DlgId, NewDlgInfo, Dlgs).    
     
+
+get_component_from_state(DlgId, Dlgs)->
+    DlgInfo = orddict:fetch(DlgId, Dlgs),
+    {components, Components} = lists:keyfind(components, 1, DlgInfo),
+    Components.

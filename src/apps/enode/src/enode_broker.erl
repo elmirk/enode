@@ -133,10 +133,9 @@ handle_call(get_cid, _From, State) ->
 handle_call(get_tables, _From, State) ->
     {reply, State#state.tabs, State};
 
-%% receive request from worker to open outgoing dialogue
+%% receive request from dyn worker to open outgoing dialogue
 %% use call from dyn worker, not cast!
 handle_call({?map_msg_dlg_req, ?mapdt_open_req, Data}, {Worker, _Tag}, State)->
-
     {{value, ODlgId}, NewQueue} = queue:out(State#state.o_dialogs),
     NewState = State#state{o_dialogs=NewQueue},
     {any, State#state.c_node} ! {?map_msg_dlg_req, ?mapdt_open_req, ODlgId, Data},
@@ -158,16 +157,6 @@ handle_call(_Request, _From, State) ->
 			 {noreply, NewState :: term(), Timeout :: timeout()} |
 			 {noreply, NewState :: term(), hibernate} |
 			 {stop, Reason :: term(), NewState :: term()}.
-%% seems never used comment and then delete
-%%handle_cast({Worker, MsgType = ?map_msg_dlg_req, PrimitiveType = ?mapdt_open_req, Data}, State)->
-%%    io:format("map msg dlg req + mapdt open request ~n"),
-%%    {{value, ODlgId}, NewQueue} = queue:out(State#state.o_dialogs),
-%%    NewState = State#state{o_dialogs=NewQueue},
-%%    {any, State#state.c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
-%%    ets:insert(didpid, {ODlgId, Worker}),
-%%    io:format("didpid = ~p~n",[ets:tab2list(didpid)]),
-%%    {noreply, NewState};
-
 %send delimiter to map
 handle_cast({_Worker, ?map_msg_dlg_req, ?mapdt_delimiter_req, Data}, State)->
 
@@ -176,23 +165,12 @@ handle_cast({_Worker, ?map_msg_dlg_req, ?mapdt_delimiter_req, Data}, State)->
     {noreply, State};
 %% used when SMSR should send SRI_SM request to HLR
 %% but firts release of smsr should use this
-handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtism_req, Data}, State)->
+handle_cast({_Worker, ?map_msg_srv_req, ?mapst_snd_rtism_req, _Data}, State)->
     %%io:format("send back to c node ~n"),
 %% TODO!! what about DlgId here!!!!
 %% !!    [{_, ODlgId}] = ets:lookup(piddid, Worker),
 %% uncomment this if above line uncommented    {any, State#state.c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
-
-%% maybe this is not good idea, but we send delimit automaticaly from broker
-%% alternatives - send delimit from dyn worker or send delimit in C code ?
-%% solution - use special parameter then no need for delim req or close req
-    Data2 = list_to_binary([5, 0]),
 %% !!    {any, State#state.c_node} ! {?map_msg_dlg_req, ?mapdt_delimiter_req, ODlgId, Data2},
-    {noreply, State};
-handle_cast({Worker, MsgType = ?map_msg_srv_req, PrimitiveType = ?mapst_snd_rtism_rsp, Data}, State)->
-    io:format("send back to c node mapst_snd_rtism_rsp ~n"),
-%% TODO!! what about DlgId here!!!!
-%% !!    [{_, ODlgId}] = ets:lookup(piddid, Worker),
-%% !!    {any, State#state.c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
     {noreply, State};
 handle_cast({_Worker, MsgType = ?map_msg_srv_req, PrimitiveType =
                  ?mapst_mo_fwd_sm_req, ODlgId, Data}, State)->
@@ -201,16 +179,13 @@ handle_cast({_Worker, MsgType = ?map_msg_srv_req, PrimitiveType =
     %%[{_, ODlgId}] = ets:lookup(piddid, Worker),
     {any, State#state.c_node} ! {MsgType, PrimitiveType, ODlgId, Data},
     {noreply, State};
-
 %%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 %%TODO - dyn worker doesnt send CLOSE DLG, we send it from Broker,
 %% need to anaylize if it possible to send close directly from C code????
-handle_cast({Worker, ?map_msg_srv_req, ?mapst_snd_rtism_rsp, DlgId, Data}, State)->
-    io:format("send SRI_SM_ACK from smsrouter ~n"),
+handle_cast({_Worker, ?map_msg_srv_req, ?mapst_snd_rtism_rsp, DlgId, Data}, State)->
     {any, State#state.c_node} ! {?map_msg_srv_req, ?mapst_snd_rtism_rsp, DlgId, Data},
     %%Data2 = list_to_binary([5, 0]),
     %%{any, ?c_node} ! {?map_msg_dlg_req, ?mapdt_close_req, DlgId, Data2},
-
     {noreply, State};
 
 handle_cast({Worker, WClass, ?map_msg_srv_req, ?mapst_mt_fwd_sm_rsp, DlgId, Data}, State)->
@@ -240,7 +215,12 @@ handle_cast({_Worker, ?map_msg_srv_req, ?mapst_rpt_smdst_rsp, DlgId, Data}, Stat
 
     {noreply, State};
 
-handle_cast({Worker, MsgType, PrimitiveType, DlgId, Data}, State)->
+handle_cast({?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, Data}, State)->
+
+   {any, State#state.c_node} ! {?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, Data},
+
+    {noreply, State};
+handle_cast({_Worker, MsgType, PrimitiveType, DlgId, Data}, State)->
     io:format("send back MAP MT FORWARD SM ACK to c node ~n"),
     {any, State#state.c_node} ! {MsgType, PrimitiveType, DlgId, Data},
     {noreply, State};
@@ -319,6 +299,16 @@ handle_info({mapdt_close_ind, DlgId, Data}, State) ->
     NewState = State#state{o_dialogs=NewQueue},
     ets:delete(didpid, DlgId),
     {noreply, NewState};
+
+handle_info({mapdt_uabort_ind, DlgId, Data}, State)->
+    lager:error("mapdt_uabort received: ~p",[DlgId]),
+    case lookup_didpid(DlgId) of
+        [{_, Pid}]->
+            gen_server:cast(Pid, {mapdt_uabort_ind, DlgId, Data});
+        []->
+            lager:error("mapdt_uabort:no_data_didpid:~p",[DlgId])
+    end,
+    {noreply, State};
 
 handle_info({'EXIT', Pid, Reason}, State)->
     io:format("~p exited with reason = ~p~n",[Pid, Reason]),
@@ -451,4 +441,5 @@ create_tables() ->
 get_tables()->
     gen_server:call(?MODULE, get_tables).
     
-
+lookup_didpid(DlgId)->
+    ets:lookup(didpid, DlgId).

@@ -31,19 +31,9 @@ stop() ->
 get_cnum([_H | Msisdn])->
     Mv = get(mv_subscribers),
     case catch taran:call(Mv#mv.tarantool,get_num, [Msisdn]) of
-        {ok,Out}
-        ->
-            ok,
+        {ok,Out}->
             [16#0b, 16#91] ++ Out;
         Other->
-            io:format("reply = ~p~n",[Other]),
-            check_local_db(Msisdn)
+            lager:error("taran returned:~p",[Other]),
+            []
     end.
-
-%%
-%%    ets:insert(subscribers, {<<16#91, 16#97, 16#80, 16#33, 16#47, 16#33, 16#f9>>,
-%%			     <<16#0b, 16#91, 16#97, 16#06, 16#30, 16#05, 16#00, 16#f0>>}),
-
-check_local_db(Msisdn)->
-    [{_, Tp_da}] = ets:lookup(subscribers, list_to_binary(Msisdn)),
-    binary_to_list(Tp_da).

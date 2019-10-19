@@ -85,9 +85,8 @@ parse_service_data([?mappn_sm_rp_ui | [Length | T]]) ->
     Sm_rp_ui = lists:sublist(T, 1, Length ),
  
 %%%TBD - refactor!!
-   put(sm_rp_ui, Sm_rp_ui),
-    Sm_rp_uiB = list_to_binary(Sm_rp_ui),
-    Sms_deliver_ = sm_rp_ui:parse(Sm_rp_uiB),
+    put(sm_rp_ui, Sm_rp_ui),
+    sm_rp_ui:parse( list_to_binary(Sm_rp_ui) ),
    
     Out = lists:nthtail(Length, T),
     parse_service_data(Out);

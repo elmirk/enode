@@ -16,8 +16,6 @@
 %% Supervisor callbacks
 -export([init/1]).
 
--define(SERVER, ?MODULE).
-
 %%%===================================================================
 %%% API functions
 %%%===================================================================
@@ -33,7 +31,7 @@
 %%		      {error, term()} |
 %%		      ignore.
 start_link(Name, Limit, MFA) ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, {Name, Limit, MFA}).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, {Name, Limit, MFA}).
 
 %%%===================================================================
 %%% Supervisor callbacks
@@ -58,21 +56,45 @@ init({Name, Limit, MFA}) ->
 		 intensity => 1,
 		 period => 5},
 
-    AChild = #{id => broker,
-	       start => {enode_broker, start_link, [Name, Limit, self(), MFA]},
-	       restart => permanent,
-	       shutdown => 5000,
-	       type => worker,
-	       modules => [enode_broker]},
+%% child_spec() = #{id => child_id(),       % mandatory
+%%                  start => mfargs(),      % mandatory
+%%                  restart => restart(),   % optional
+%%                  shutdown => shutdown(), % optional
+%%                  type => worker(),       % optional
+%%                  modules => modules()}   % optional
+%%     child_id() = term()
+%%     mfargs() = {M :: module(), F :: atom(), A :: [term()]}
+%%     modules() = [module()] | dynamic
+%%     restart() = permanent | transient | temporary
+%%     shutdown() = brutal_kill | timeout()
+%%     worker() = worker | supervisor
 
-    MaintainerCh = #{id => maintainer,
-	       start => {maintainer, start_link, []},
-	       restart => temporary,
-	       shutdown => 5000,
-	       type => worker,
-	       modules => [maintainer]},
 
-    {ok, {SupFlags, [AChild, MaintainerCh]}}.
+    BrokerChildSpec = #{id => broker,
+                        start => {enode_broker, start_link, [Name, Limit, self(), MFA]},
+                        restart => permanent,
+                        shutdown => 5000,
+                        type => worker,
+                        modules => [enode_broker]},
+
+    MaintainerChildSpec = #{id => maintainer,
+                            start => {maintainer, start_link, []},
+                            restart => temporary,
+                            shutdown => 5000,
+                            type => worker,
+                            modules => [maintainer]},
+
+    DirectoryChildSpec = #{id => directory,
+                           start => {directory, start_link, [e2,e4]},
+                           restart => temporary,
+                           shutdown => 5000,
+                           type => worker,
+                           modules => [directory]},
+
+%%root supervisor start 3 gen_server workers:
+%% broker, maintainer and directory    
+
+    {ok, {SupFlags, [BrokerChildSpec, MaintainerChildSpec, DirectoryChildSpec]}}.
 
 %%%===================================================================
 %%% Internal functions

@@ -205,16 +205,16 @@ parse_sms_deliver(Udhi, Data)->
                                         end,
     <<Header:HeaderLength/binary, Ud_wo_header/binary >> = Other,
 
-    Ud2 = case Dcs of
-              ?dcs_ucs2 ->
+    Ud2 = case directory:get_coding(Dcs) of
+              ucs2 ->
                   "ucs2";
-              ?dcs_7bit ->
-                  sms_7bit_encoding:from_7bit(Ud);
+              gsm7bit ->
+                  sms_7bit_encoding:from_7bit(Ud)
               %%akbars send sms with this DCS
-              16#01 ->
-                  sms_7bit_encoding:from_7bit(Ud);
-              ?dcs_8bit_class0 ->
-                  "special_sms"
+%%              16#01 ->
+%%                  sms_7bit_encoding:from_7bit(Ud);
+%%              ?dcs_8bit_class0 ->
+%%                  "special_sms"
           end,
 
     #sm_rp_ui{message_type = sms_deliver,

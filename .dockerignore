@@ -1,2 +1,5 @@
 */_build
 */rebar3.crashdump
+*.gz
+backup
+_build

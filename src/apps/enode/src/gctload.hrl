@@ -17,12 +17,8 @@
 -define(mapdt_u_abort_ind, 8).
 -define(mapdt_p_abort_ind, 9).
 -define(mapdt_notice_ind, 10).
--define(mapdt_open_rsp, 129).
-
-%%MAP-OPEN-CNF MAPDT_OPEN_CNF 130 0x82
-
-%% TBD!! how all it works? without next def?
-%%MAP-OPEN-CNF MAPDT_OPEN_CNF 130 0x82
+-define(mapdt_open_rsp, 129). %%0x81
+-define(mapdt_open_cnf, 16#82).
 
 %% service primitive types
 -define(empty_service_portion, 16#00). %%if incoming components list

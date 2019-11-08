@@ -32,16 +32,13 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3, format_status/2]).
 
-%%-include("dyn_defs.hrl").
 -include("gctload.hrl").
 -include("enode_broker.hrl").
+-include("gt_conf.hrl").
 
 -define(sccp_called, 1).
 -define(sccp_calling, 3).
 -define(ac_name, 11).
--define(dummy_dest, [16#0b, 16#12, 16#06, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#20, 16#0]).
--define(smsr_sccp_gt, [16#0b, 16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#20, 16#09]).
--define(smsc_sccp_gt, [16#0b, 16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#10, 0]).
 
 
 -define(DLG_STATE_OPEN_CONFIRMED, [{state, open_confirmed}]).
@@ -49,7 +46,8 @@
 -define(DLG_STATE_WAIT_FOR_DELIMIT, [{state, waiting_for_delimit}]).
 %%used in MO_FORWARD_SM, actually SMSC
 %%with type at the beginning
--define(sm_rp_da, [16#17, 16#09, 16#04, 16#07, 16#91, 16#97, 16#05, 16#66, 16#15, 16#10, 16#f0]).
+%%-define(sm_rp_da, [16#17, 16#09, 16#04, 16#07, 16#91, 16#97, 16#05, 16#66, 16#15, 16#10, 16#f0]).
+
 
 -record(state, {subscriber_id, %%msisdn of subscirber, B num
                 dlg_id,        %%root dialog id, SRI_SM from HLR
@@ -76,17 +74,7 @@
 %%                             from smsc tmt and then worker exit
 
 
-%%-record(dialog, {dlg_id,
-%%                 tarantool,
-%%		 components = [],
-%%		 sccp_calling,
-%%		 sccp_called,
-%%		 ac_name}).
 
-%%-record(dlg_info, {dlg_state,
-%%                   components = []}).
-
-%%-record(sccp, {sccp_calling, sccp_called, ac_name}).
 
 %%%===================================================================
 %%% API
@@ -122,17 +110,9 @@ start_link(StartLevel,DlgId) ->
 			      ignore.
 %% this is from skeleton init([]) ->
 init([initial_start, DlgId])->
-%%    State = case taran:connect() of
-%%                {ok, TTconn} -> #state{dlg_id = DlgId, tarantool = TTconn};
-%%                _Other -> #state{dlg_id = DlgId, tarantool = fail}
-%%            end,
-
 %% start all modules running in dw process
 %% this is wrong because we need tarantool connection only for SRI_SM
-%% phase on smsrouter, should move to another place
-%%    subscribers:start(),
-
-
+%% phase on smsrouter
 
     State = #state{dlg_id = DlgId, dlgs = orddict:new()},
     {ok, State}.
@@ -179,33 +159,18 @@ handle_cast({dlg_ind_open, DlgId, Request}, State) ->
 %% suppose we analyxe dlg_ind_open messages and SMSR allow to establish dialogue
 %% Now let's send DLG_OPEN_RSP bask to C node!
 
-%% {mapdt_open_rsp, DlgId, BinaryData}
 %% should construct payload like this
 %%  p810501000b0906070400000100140300
 %% send open_resp after delimit ind received!!
-%%    Payload = create_map_open_rsp_payload(),
-%%    DlgId = State#dialog.dlg_id,
-%%    gen_server:cast(broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
-  
-    Dlgs = State#state.dlgs,
-%%orddict:store(DlgId, open, Dlgs),
 %%TBD should check if this dialog already exist and opened and do
 %% something in this case
+	Dlgs = State#state.dlgs,
     NewState = State#state{dlgs = orddict:append(DlgId, {state, open}, Dlgs)},
     {noreply, NewState};
 
 %%--------------------------------------------------------------------
 %% Case - receive empty TCAP-BEGIN
 %%--------------------------------------------------------------------
-%%handle_cast({delimit_ind, _Request}, State = #state{dlg_state = open}) ->
-
-%%    Payload = create_map_open_rsp_payload(),
-%%    DlgId = State#state.dlg_id,
-%%    gen_server:cast(?enode_broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
-%%    send_continue(DlgId),
-
-%%    NewState = State#state{dlg_state = open_confirmed},
-%%    {noreply, NewState};
 
 handle_cast( {srv_ind, DlgId, Request}, State ) ->
     
@@ -222,8 +187,6 @@ handle_cast( {srv_ind, DlgId, Request}, State ) ->
                          io:format("srv_ind received in state OPEN_CONFIRMED ~n"),
                          ?DLG_STATE_WAIT_FOR_DELIMIT ++ [{components, Request}]
                  end,
-%%    NewDlgs = orddict:store(DlgId, NewDlgInfo, Dlgs),
-
     NewDlgs = update_dlg_info(DlgId, NewDlgInfo, State#state.dlgs),
     NewState = State#state{dlgs = NewDlgs},
     {noreply, NewState};
@@ -231,54 +194,28 @@ handle_cast( {srv_ind, DlgId, Request}, State ) ->
 %% Case - receive empty TCAP-BEGIN
 %% and then in the same transaction receive SRV_IND
 %%--------------------------------------------------------------------
-%%handle_cast({srv_ind, Request}, State = #state{dlg_state = open_confirmed} ) ->
-%%    io:format("srv_ind received in state OPEN_CONFIRMED ~n"),
-%%    Components = State#state.components,
-%%    NewState = State#state{components = [ Request | Components ],
-%%    dlg_state = waiting_for_delimit},
-%%    {noreply, NewState};
-%% when smsr open outgoing dlg with some network node
+%% when smsr opens outgoing dlg with some network node
 %% then open_confirm received from remote node
 handle_cast({mapdt_open_cnf, DlgId, _Request}, State) ->
-
- %%   case get(flag) of
-%%	undefined ->
-%%	    do_nothing;
-%%	1 ->   
-%%	    io:format("in mo_forward_sm_req function after cast ~n"),
-	   %% io:format("sm rp oa ~p and tp da ~p in mo forward sm req ~n", [Sm_Rp_Oa, Tp_Da]),
-%%	    Payload2 = mo_forwardSM(get(smrpoa),get(tpda)),
-%%	    gen_server:cast(broker, {self(), ?map_msg_srv_req, ?mapst_mo_fwd_sm_req, list_to_binary(Payload2)})
-  %%  end,
-    Dlgs = State#state.dlgs,
-%%orddict:store(DlgId, open, Dlgs),
 %%TBD should check if this dialog already exist and opened and do
 %% something in this case
-    NewState = State#state{dlgs = orddict:append(DlgId, {state, open_confirmed}, Dlgs)},
+     Dlgs = State#state.dlgs,
+	NewState = State#state{dlgs = orddict:append(DlgId, {state, open_confirmed}, Dlgs)},
     {noreply, NewState};
 
-%%handle_cast({delimit_ind, Request}, State = #state{dlg_state = open_waiting_for_delimit}) ->
 handle_cast({delimit_ind, DlgId, _Request}, State) ->
     io:format("delimit ind 1 ~n"),
-    
-%%    Dlgs = State#state.dlgs,
-%%    DlgInfo = orddict:fetch(DlgId, Dlgs),
-%%    {state, DlgState} = lists:keyfind(state, 1, DlgInfo),
-%%    {components, Components} = lists:keyfind(components, 1, DlgInfo),
-
     DlgState = get_dlg_state(DlgId, State#state.dlgs),
 
     case DlgState of 
         %%receive empty TCAP-BEGIN
-        %% Belline use mapv3
+        %% Beeline use mapv3
         open ->
             Payload = create_map_open_rsp_payload(),
             gen_server:cast(?enode_broker, {order, ?map_msg_dlg_req, ?mapdt_open_rsp, DlgId, list_to_binary(Payload)}),
-            send_continue(DlgId),
-            
+            send_continue(DlgId),            
             %% TODO
             %% really need following check here?
-            %%false = lists:keyfind(components, 1, DlgInfo),
             NewDlgs = update_dlg_info(DlgId, ?DLG_STATE_OPEN_CONFIRMED, State#state.dlgs),
             {noreply, State#state{dlgs = NewDlgs}};
 
@@ -514,9 +451,6 @@ handle_service_data(Components,DlgId)->
             case ets:lookup(sri_sm, Key) of
                 [] ->
                     io:format("key not found in sri_sm table ~n"),
-                    %% Cid = get_cid(),
-                    %% Result_ = ets:update_counter(sri_sm, Key, {3,1} , {Key,Cid,0});
-                    %% Result = ets:insert(sri_sm, {Key, Cid, Now}),
                     case subscribers:get_cnum(Msisdn) of
                         %%TODO:should send some reason in srm_sm_ack or dialog abort?
                         [] ->
@@ -538,10 +472,6 @@ handle_service_data(Components,DlgId)->
                                                                     Timestamp,
                                                                 native,
                                                                 second),
-                            %%Cid = get_cid(),
-                            %%ets:insert(sri_sm, {Key, Cid, Now}),
-                            %%ets:insert(cid, {bcd:encode(imsi, Cid), Msisdn, Tp_da}),
-                            %%send_sri_sm_ack(Components, DlgId, Cid),
                             case TimeDiff < ?cid_update_interval of
                                 false ->
                                     io:format("need update cid ~n"),
@@ -640,48 +570,6 @@ handle_service_data(Components,DlgId)->
                                              mt_sms_part_mms
                                      end
                     end;
-%%                    Ref = sm_rp_ui:get_ref(),
-%%                    Key = Imsi ++ [Ref],
-%%                    ets:insert(parts, {Key, get(sm_rp_ui_mv)}),
-%%                    put(more_msg, undefined),
-%%                    mt_forward_sm_ack_continue(State#state.dlg_id),
-
-%%                    PartsReceived = case get(parts_received) of
-%%                                       undefined ->
-%%                                           1;
-%%                                       Parts ->
-%%                                           Parts+1
-%%                                   end,
-%%                    put(parts_received, PartsReceived),
-                    %%MaxNum = sm_rp_ui:get_maxnum(),
-                    %%put(max_num, MaxNum)
-
-                    %%MaxNum = case get(max_num) of
-                     %%            undefined ->
-                     %%                sm_rp_ui:get_maxnum();
-                     %%            Value ->
-                     %%                Value
-                     %%        end,
-                    %%put(max_num, MaxNum),
-                    %%MaxNum = sm_rp_ui:get_maxnum(),
-                    %%put(max_num, MaxNum)
-
-
-                    %% need to use some more elegant solution to check
-                    %% if this is sms from smsc tmt console (part=max=1)
-                    %%WClass = if
-                     %%            MaxNum =:= 1->
-                     %%                mt_sms_console;
-                     %%            true ->
-                     %%                mt_sms_part
-                     %%        end,
-
-                    %%
-                    %% should store in ets, becauser worker may be exited
-                    %%
-                    
-                    %%ets:insert(db0, {Key, MaxNum, PartsReceived}),
-                    %%WClass = mt_sms_part;
                 
                 {undefined, shortMsgMTRelayContext_v3}->
                     %% could be next cases: 
@@ -694,9 +582,6 @@ handle_service_data(Components,DlgId)->
                             lager:warning("map3;mt_sms without header,relay to smsc;dlg=~p", [DlgId]),
                             WClass = mt_sms_single,
                             mt_forward_sm_ack(DlgId, WClass),
-                            %%Sm_rp_da = get(sm_rp_da),
-                            %%[_Type | [Length | Imsi  ]] = Sm_rp_da,
-                            %%ImsiL = bcd:decode(imsi, list_to_binary(Imsi)),
                             [{_Cid, Sm_rp_oa, Tp_da}] = ets:lookup(cid, list_to_binary(Imsi)),
                             mo_forward_sm_req(Sm_rp_oa, Tp_da);
                         {sms_with_header, 0} ->
@@ -708,14 +593,7 @@ handle_service_data(Components,DlgId)->
                             %%do not forward this type of sms
                             mt_forward_sm_ack(DlgId, WClass);
                         {sms_part, PartData}->                    
-                            
-                            %%Ref = sm_rp_ui:get_ref(),
-                            %%Key = Imsi ++ [Ref],
-
-                            %%put(parts_received, PartsReceived),
-                            %%ets:insert(db0, {Key, PartsReceived})
-
-                            MaxNum = case get(max_num) of
+							 MaxNum = case get(max_num) of
                                 undefined ->
                                     sm_rp_ui:get_maxnum();
                                 Value ->
@@ -761,11 +639,8 @@ handle_service_data(Components,DlgId)->
                                                      ets:delete(parts, Key),
                                                      mo_sms_concatenated;
                                                  true ->
-                                                     %%Result_ = ets:update_counter(db0,Key,{3,1})
                                                      mt_sms_part
                                              end
-                                             %%io:format("stay after mo forward sm~n"),
-                                             %%mt_sms_part
                                      end
                     end
             end,
@@ -779,9 +654,6 @@ handle_service_data(Components,DlgId)->
                 {sms_no_header, 0} ->
                     WClass = mt_sms_single,
                     forward_sm_ack(DlgId, WClass),
-                    %%Sm_rp_da = get(sm_rp_da),
-                    %%[_Type | [Length | Imsi  ]] = Sm_rp_da,
-                    %%ImsiL = bcd:decode(imsi, list_to_binary(Imsi)),
                     [{_Cid, Sm_rp_oa, Tp_da}] = ets:lookup(cid, list_to_binary(Imsi)),
                     mo_forward_sm_req(Sm_rp_oa, Tp_da);
                 {sms_with_header, 0} ->
@@ -817,9 +689,6 @@ handle_service_data(Components,DlgId)->
                     
                     %%forward_sm_ack(State#state.dlg_id),
                     ets:insert(parts, {Key, get(sm_rp_ui_mv)}),
-                    %%     Sm_rp_da = get(sm_rp_da),
-                    %%    [_Type | [Length | Imsi  ]] = Sm_rp_da,
-                    %%ImsiL = bcd:decode(imsi, list_to_binary(Imsi)),
 
                     if
                         MaxNum =:= PartsReceived ->
@@ -842,10 +711,6 @@ handle_service_data(Components,DlgId)->
                     end,
                     io:format("stay after mo forward sm~n")
                                                 
-                    %%[{_Cid, Sm_rp_oa, Tp_da}] = ets:lookup(cid, list_to_binary(Imsi)),
-                    %%mo_forward_sm_req(Sm_rp_oa, Tp_da),
-%%                    io:format("stay after mo forward sm all parts received~n")
-                    %%end
             end,
             {mt_fsm, WClass};
         
@@ -880,9 +745,6 @@ io:format("in srim sm req function after cast ~n"),
 send_sri_sm_ack(Components, DlgId, Cid)->
     Fimsi= bcd:encode(imsi, Cid),
     Payload = construct_sri_sm_ack(Fimsi),
-%%    Payload x= [16#81,  16#0e, 16#01, 16#b5,   16#12, 16#08, 16#52, 16#20,
-%%	       16#07, 16#01, 16#30, 16#43, 16#77, 16#f7,  16#13, 16#07,
-%%	       16#91, 16#97, 16#05, 16#66, 16#15, 16#20, 16#f9, 16#00],
     gen_server:cast(?enode_broker, {self(), ?map_msg_srv_req, ?mapst_snd_rtism_rsp, DlgId, list_to_binary(Payload)}).
 
 
@@ -895,9 +757,7 @@ construct_sri_sm_ack(Imsi)->
     InvokeId = [?mappn_invoke_id, 1] ++ Invoke,
     ImsiParam = [?mappn_imsi, 16#08] ++  binary_to_list(Imsi),
 %%smsr gt as smsc, we need to intercept mt sms
-    Other = [16#13, 16#07, 16#91, 16#97, 16#05,
-	     16#66, 16#15, 16#20, 16#f9] ++
-	[?mappn_dialog_type,1,?mapdt_close_req, ?mappn_release_method, 1, 0, 0],
+    Other = [?smsr_sccp_gt_f] ++ [?mappn_dialog_type,1,?mapdt_close_req, ?mappn_release_method, 1, 0, 0],
     [?mapst_snd_rtism_rsp] ++ InvokeId ++ ImsiParam ++ Other.
 
 %%send ReturnResult to SMSC on report-SMdeliveryStatus
@@ -911,10 +771,6 @@ send_rpt_smdst_ack(DlgId) ->
 %%%
 %%% 
 mt_forward_sm_ack(DlgId, WClass)->
-%%    Payload = map_msg_srv_req(),
-%%    CorrelationId = get(correlationid),
-%%    Fimsi= bcd:encode(imsi, CorrelationId),
-%%    Payload = construct_sri_sm_ack(Fimsi),
     Invoke = get(invoke_id),
     InvokeId = [?mappn_invoke_id, 1] ++ Invoke,
 
@@ -929,10 +785,7 @@ mt_forward_sm_ack(DlgId, WClass)->
 %%% attempt to receive all parts of concatenated msgs in one transaction
 %%% ?mappn_sm_rp_ui, 16#02, 16#0, 16#0,  --- SMS-DELIVER-REPORT
 mt_forward_sm_ack_continue(DlgId)->
-%%    Payload = map_msg_srv_req(),
-%%    CorrelationId = get(correlationid),
-%%    Fimsi= bcd:encode(imsi, CorrelationId),
-%%    Payload = construct_sri_sm_ack(Fimsi),
+
     Invoke = get(invoke_id),
     InvokeId = [?mappn_invoke_id, 1] ++ Invoke,
 
@@ -944,10 +797,6 @@ mt_forward_sm_ack_continue(DlgId)->
 
 %%map v2 used to sent sms from foreign SMSC
 forward_sm_ack(DlgId, Wclass)->
-%%    Payload = map_msg_srv_req(),
-%%    CorrelationId = get(correlationid),
-%%    Fimsi= bcd:encode(imsi, CorrelationId),
-%%    Payload = construct_sri_sm_ack(Fimsi),
     Invoke = get(invoke_id),
     InvokeId = [?mappn_invoke_id, 1] ++ Invoke,
 
@@ -958,10 +807,6 @@ forward_sm_ack(DlgId, Wclass)->
     gen_server:cast(?enode_broker, {self(), Wclass, ?map_msg_srv_req, ?mapst_fwd_sm_rsp, DlgId, list_to_binary(Payload)}).
 
 forward_sm_ack_continue(DlgId)->
-%%    Payload = map_msg_srv_req(),
-%%    CorrelationId = get(correlationid),
-%%    Fimsi= bcd:encode(imsi, CorrelationId),
-%%    Payload = construct_sri_sm_ack(Fimsi),
     Invoke = get(invoke_id),
     InvokeId = [?mappn_invoke_id, 1] ++ Invoke,
 
@@ -1196,40 +1041,9 @@ mo_forwardSM2(Msisdn, Tp_Da, Key)->
                 [?mappn_dialog_type, 1, ?mapdt_delimiter_req, 0] ]
     end.
 
-%% parsing received srv_ind data from C node
-%%parse_srv_data([?mapst_snd_rtism_ind | T]) ->
-%%    parse_srv_data(T);
-%%parse_srv_data([?mappn_invoke_id | [Length | T]]) ->
-%%    InvokeId = lists:sublist(T, 1, Length ),
-%%    put(invoke_id, InvokeId),
-%%    Out = lists:nthtail(Length, T),
-%%    parse_srv_data(Out);
-%%parse_srv_data([?mappn_msisdn | [Length | T]]) ->
-%%    Msisdn = lists:sublist(T, 1, Length ),
-%%    put(msisdn, Msisdn),
-%%    Out = lists:nthtail(Length, T),
-%%    parse_srv_data(Out);
-%%parse_srv_data([?mappn_sm_rp_pri | [Length | T]]) ->
-%%    Smrppri = lists:sublist(T, 1, Length ),
-%%    put(sm_rp_pri, Smrppri),
-%%    Out = lists:nthtail(Length, T),
-%%    parse_srv_data(Out);
-%%parse_srv_data([?mappn_sc_addr | [Length | T]]) ->
-%%    Smscaddr = lists:sublist(T, 1, Length ),
-%%    put(sc_addr, Smscaddr),
-%%    Out = lists:nthtail(Length, T),
-%%    parse_srv_data(Out);
-%%parse_srv_data([0])->
-%%    ok.
-
 -spec map_srv_req_primitive( atom(),[binary()] ) -> binary().
 map_srv_req_primitive(snd_rtism_req, Components)->
     [Component] = Components,
-    %%should remove last 0 from binary
-    %%New = binary_part(Component, {0, byte_size(Component)-1}),
-    %%Out = <<New/binary, ?mappn_dialog_type, 1, ?mapdt_delimiter_req,0>>,
-    %%io:format("Out = ~p~n", [Out]),
-    %%Out.
     <<_First:8, Rest/binary>> = Component,
     Out = << ?mapst_snd_rtism_req, Rest/binary, ?mappn_dialog_type, 1 , ?mapdt_delimiter_req, 0>>,
     Out.

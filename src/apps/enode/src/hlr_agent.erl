@@ -4,6 +4,7 @@
 
 -include("gctload.hrl").
 -include("enode_broker.hrl").
+-include("gt_conf.hrl").
 
 
 -export([invoke_reportSM_DeliveryStatus/1]).
@@ -14,9 +15,7 @@
 -define(sccp_called, 1).
 -define(sccp_calling, 3).
 -define(ac_name, 11).
--define(dummy_dest, [16#0b, 16#12, 16#06, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#20, 16#0]).
--define(smsr_sccp_gt, [16#0b, 16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#20, 16#09]).
--define(smsc_sccp_gt, [16#0b, 16#12, 16#08, 0, 16#11, 16#04, 16#97, 16#05, 16#66, 16#15, 16#10, 0]).
+
 
 
 %%Components is binary
@@ -60,12 +59,6 @@ create_map_open_dlg_req_payload(List, sccp_calling) ->
 
 -spec create_map_srv_req_primitive( atom(), binary() ) -> binary().
 create_map_srv_req_primitive(mapst_rpt_smdst_req, Components)->
-    %%[Component] = Components,
-    %%should remove last 0 from binary
-    %%New = binary_part(Component, {0, byte_size(Component)-1}),
-    %%Out = <<New/binary, ?mappn_dialog_type, 1, ?mapdt_delimiter_req,0>>,
-    %%io:format("Out = ~p~n", [Out]),
-    %%Out.
     <<_First:8, Rest/binary>> = Components,
     %%should remove terminating zero byte from binary
     Rest2 = binary_part(Rest, {0, byte_size(Rest)-1}),
